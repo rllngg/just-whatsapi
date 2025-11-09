@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: whatsapp-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - whatsapp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO client to create bucket on startup
+  minio-init:
+    image: minio/mc:latest
+    container_name: whatsapp-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb myminio/whatsapp-media --ignore-existing;
+      /usr/bin/mc anonymous set download myminio/whatsapp-media;
+      exit 0;
+      "
+    networks:
+      - whatsapp-network
+
+  # Webhook receiver for testing
+  webhook-receiver:
+    build:
+      context: ./test
+      dockerfile: Dockerfile.webhook
+    container_name: whatsapp-webhook-receiver
+    ports:
+      - "3000:3000"
+    networks:
+      - whatsapp-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # WhatsApp service
+  whatsapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-service
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - WEBHOOK_URL=http://webhook-receiver:3000/webhook
+      - WEBHOOK_SECRET=your-secret-key
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=whatsapp-media
+      - S3_REGION=us-east-1
+      - S3_USE_SSL=false
+      - DATABASE_PATH=/data/whatsapp.db
+    volumes:
+      - whatsapp_data:/data
+    depends_on:
+      - minio
+      - webhook-receiver
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+    driver: local
+  whatsapp_data:
+    driver: local
+
+networks:
+  whatsapp-network:
+    driver: bridge

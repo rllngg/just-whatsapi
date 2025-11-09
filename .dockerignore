@@ -1,0 +1,38 @@
+# Binaries
+whatsapp
+whatsapp-server
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Environment variables
+.env
+
+# Git
+.git
+.gitignore
+
+# IDE files
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+*.test
+test/
+
+# Documentation
+*.md
+
+# Docker files (not needed in image)
+docker-compose.yml
+Dockerfile
+.dockerignore
