@@ -1,0 +1,310 @@
+basePath: /
+definitions:
+  whatsapp.MessageResponse:
+    properties:
+      message_id:
+        type: string
+    type: object
+  whatsapp.SendFileMessageRequest:
+    properties:
+      caption:
+        type: string
+      chat_id:
+        type: string
+      device_id:
+        type: string
+      duration:
+        type: integer
+      file_url:
+        type: string
+      is_forwarded:
+        type: boolean
+      reply_message_id:
+        type: string
+    type: object
+  whatsapp.SendImageMessageRequest:
+    properties:
+      caption:
+        type: string
+      chat_id:
+        type: string
+      device_id:
+        type: string
+      duration:
+        type: integer
+      file_url:
+        type: string
+      is_forwarded:
+        type: boolean
+      reply_message_id:
+        type: string
+      view_once:
+        type: boolean
+    type: object
+  whatsapp.SendPresenceRequest:
+    properties:
+      chat_id:
+        type: string
+      device_id:
+        type: string
+      is_forwarded:
+        type: boolean
+    type: object
+  whatsapp.SendReactionRequest:
+    properties:
+      chat_id:
+        type: string
+      device_id:
+        type: string
+      emoji:
+        type: string
+      is_forwarded:
+        type: boolean
+      message_id:
+        type: string
+    type: object
+  whatsapp.SendTextMessageRequest:
+    properties:
+      chat_id:
+        type: string
+      device_id:
+        type: string
+      duration:
+        type: integer
+      is_forwarded:
+        type: boolean
+      message:
+        type: string
+      reply_message_id:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@example.com
+    name: API Support
+  description: API for managing WhatsApp devices and sending messages
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: WhatsApp Gateway API
+  version: "1.0"
+paths:
+  /device:
+    get:
+      consumes:
+      - application/json
+      description: Returns a list of all registered WhatsApp devices
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of devices with id and status
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+      summary: Get all devices
+      tags:
+      - Device
+  /device/new:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new WhatsApp device and returns a QR code for authentication
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns base64 encoded QR code
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create new WhatsApp device
+      tags:
+      - Device
+  /message/emoji:
+    post:
+      consumes:
+      - application/json
+      description: Sends an emoji reaction to a specific message in a WhatsApp chat
+      parameters:
+      - description: Reaction request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/whatsapp.SendReactionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Reaction sent successfully
+          schema:
+            $ref: '#/definitions/whatsapp.MessageResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Send emoji reaction
+      tags:
+      - Message
+  /message/file:
+    post:
+      consumes:
+      - application/json
+      description: Sends a file/document message to a WhatsApp chat
+      parameters:
+      - description: File message request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/whatsapp.SendFileMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: File sent successfully
+          schema:
+            $ref: '#/definitions/whatsapp.MessageResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Send file message
+      tags:
+      - Message
+  /message/image:
+    post:
+      consumes:
+      - application/json
+      description: Sends an image message to a WhatsApp chat
+      parameters:
+      - description: Image message request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/whatsapp.SendImageMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Image sent successfully
+          schema:
+            $ref: '#/definitions/whatsapp.MessageResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Send image message
+      tags:
+      - Message
+  /message/presence:
+    post:
+      consumes:
+      - application/json
+      description: Sends a typing indicator/presence update to a WhatsApp chat
+      parameters:
+      - description: Presence request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/whatsapp.SendPresenceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Presence sent successfully
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request body
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Send presence update
+      tags:
+      - Message
+  /message/text:
+    post:
+      consumes:
+      - application/json
+      description: Sends a text message to a WhatsApp chat
+      parameters:
+      - description: Text message request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/whatsapp.SendTextMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Message sent successfully
+          schema:
+            $ref: '#/definitions/whatsapp.MessageResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Send text message
+      tags:
+      - Message
+schemes:
+- http
+- https
+swagger: "2.0"

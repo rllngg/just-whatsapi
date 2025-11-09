@@ -6,7 +6,24 @@ import (
 	"whatsapp/src/core/whatsapp"
 
 	"github.com/gofiber/fiber/v2"
+	fiberSwagger "github.com/swaggo/fiber-swagger"
+	_ "whatsapp/docs" // Import generated Swagger docs
 )
+
+// @title WhatsApp Gateway API
+// @version 1.0
+// @description API for managing WhatsApp devices and sending messages
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.email support@example.com
+
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host localhost:8080
+// @BasePath /
+// @schemes http https
 
 // Server handles HTTP requests using Fiber for WhatsApp device management
 type Server struct {
@@ -29,6 +46,10 @@ func NewServer(manager *whatsapp.Manager) *Server {
 
 // registerRoutes registers all HTTP routes
 func (s *Server) registerRoutes() {
+	// Swagger documentation
+	s.app.Get("/swagger/*", fiberSwagger.FiberWrapHandler(fiberSwagger.URL("/swagger/doc.json")))
+
+	// Device endpoints
 	s.app.Post("/device/new", s.handleNewDevice)
 	s.app.Get("/device", s.handleGetDevices)
 
@@ -40,10 +61,33 @@ func (s *Server) registerRoutes() {
 	s.app.Post("/message/emoji", s.handleSendReaction)
 }
 
+// CreateDeviceRequest represents a request to create a new device
+type CreateDeviceRequest struct {
+	DeviceID string `json:"device_id,omitempty"` // Optional device ID
+}
+
 // handleNewDevice creates a new WhatsApp device and returns QR code
+// @Summary Create new WhatsApp device
+// @Description Creates a new WhatsApp device and returns a QR code for authentication. You can optionally provide a device_id, otherwise one will be auto-generated.
+// @Tags Device
+// @Accept json
+// @Produce json
+// @Param request body CreateDeviceRequest false "Device creation request"
+// @Success 200 {object} map[string]string "Returns device_id and base64 encoded QR code"
+// @Failure 400 {object} map[string]string "Invalid request or device ID already exists"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /device/new [post]
 func (s *Server) handleNewDevice(c *fiber.Ctx) error {
+	var req CreateDeviceRequest
+	// Parse request body if present (device_id is optional)
+	if err := c.BodyParser(&req); err != nil && err != fiber.ErrUnprocessableEntity {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
 	ctx := context.Background()
-	device, err := s.manager.CreateDevice(ctx)
+	device, err := s.manager.CreateDevice(ctx, req.DeviceID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -51,11 +95,19 @@ func (s *Server) handleNewDevice(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"qr_code": device.QRCode,
+		"device_id": device.ID,
+		"qr_code":   device.QRCode,
 	})
 }
 
 // handleGetDevices returns all devices
+// @Summary Get all devices
+// @Description Returns a list of all registered WhatsApp devices
+// @Tags Device
+// @Accept json
+// @Produce json
+// @Success 200 {array} map[string]interface{} "List of devices with id and status"
+// @Router /device [get]
 func (s *Server) handleGetDevices(c *fiber.Ctx) error {
 	devices := s.manager.GetDevices()
 
@@ -86,6 +138,16 @@ func (s *Server) App() *fiber.App {
 }
 
 // handleSendTextMessage handles text message sending
+// @Summary Send text message
+// @Description Sends a text message to a WhatsApp chat
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param request body whatsapp.SendTextMessageRequest true "Text message request"
+// @Success 200 {object} whatsapp.MessageResponse "Message sent successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /message/text [post]
 func (s *Server) handleSendTextMessage(c *fiber.Ctx) error {
 	var req whatsapp.SendTextMessageRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -106,6 +168,16 @@ func (s *Server) handleSendTextMessage(c *fiber.Ctx) error {
 }
 
 // handleSendImageMessage handles image message sending
+// @Summary Send image message
+// @Description Sends an image message to a WhatsApp chat
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param request body whatsapp.SendImageMessageRequest true "Image message request"
+// @Success 200 {object} whatsapp.MessageResponse "Image sent successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /message/image [post]
 func (s *Server) handleSendImageMessage(c *fiber.Ctx) error {
 	var req whatsapp.SendImageMessageRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -126,6 +198,16 @@ func (s *Server) handleSendImageMessage(c *fiber.Ctx) error {
 }
 
 // handleSendFileMessage handles file message sending
+// @Summary Send file message
+// @Description Sends a file/document message to a WhatsApp chat
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param request body whatsapp.SendFileMessageRequest true "File message request"
+// @Success 200 {object} whatsapp.MessageResponse "File sent successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /message/file [post]
 func (s *Server) handleSendFileMessage(c *fiber.Ctx) error {
 	var req whatsapp.SendFileMessageRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -146,6 +228,16 @@ func (s *Server) handleSendFileMessage(c *fiber.Ctx) error {
 }
 
 // handleSendPresence handles presence update
+// @Summary Send presence update
+// @Description Sends a typing indicator/presence update to a WhatsApp chat
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param request body whatsapp.SendPresenceRequest true "Presence request"
+// @Success 200 {object} map[string]string "Presence sent successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /message/presence [post]
 func (s *Server) handleSendPresence(c *fiber.Ctx) error {
 	var req whatsapp.SendPresenceRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -168,6 +260,16 @@ func (s *Server) handleSendPresence(c *fiber.Ctx) error {
 }
 
 // handleSendReaction handles reaction sending
+// @Summary Send emoji reaction
+// @Description Sends an emoji reaction to a specific message in a WhatsApp chat
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param request body whatsapp.SendReactionRequest true "Reaction request"
+// @Success 200 {object} whatsapp.MessageResponse "Reaction sent successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /message/emoji [post]
 func (s *Server) handleSendReaction(c *fiber.Ctx) error {
 	var req whatsapp.SendReactionRequest
 	if err := c.BodyParser(&req); err != nil {

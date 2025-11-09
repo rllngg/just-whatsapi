@@ -106,17 +106,21 @@ func (d *Database) GetPending(limit int) ([]*WebhookQueue, error) {
 	var webhooks []*WebhookQueue
 	for rows.Next() {
 		wh := &WebhookQueue{}
+		var lastError sql.NullString
 		var lastAttempt, nextRetry, completedAt sql.NullTime
 
 		err := rows.Scan(
 			&wh.ID, &wh.Event, &wh.Payload, &wh.WebhookURL,
-			&wh.Status, &wh.Attempts, &wh.LastError,
+			&wh.Status, &wh.Attempts, &lastError,
 			&wh.CreatedAt, &lastAttempt, &nextRetry, &completedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan webhook: %w", err)
 		}
 
+		if lastError.Valid {
+			wh.LastError = lastError.String
+		}
 		if lastAttempt.Valid {
 			wh.LastAttempt = &lastAttempt.Time
 		}

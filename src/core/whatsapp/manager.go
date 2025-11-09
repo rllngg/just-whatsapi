@@ -10,8 +10,10 @@ import (
 	"sync"
 
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -36,6 +38,7 @@ type Device struct {
 type Manager struct {
 	devices   map[string]*Device
 	container *sqlstore.Container
+	deviceDB  *DeviceDatabase
 	logger    waLog.Logger
 	publisher EventPublisher
 	mu        sync.RWMutex
@@ -48,9 +51,16 @@ func NewManager(dbPath string, logger waLog.Logger) (*Manager, error) {
 		return nil, fmt.Errorf("failed to create container: %w", err)
 	}
 
+	// Create device mapping database
+	deviceDB, err := NewDeviceDatabase(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create device database: %w", err)
+	}
+
 	return &Manager{
 		devices:   make(map[string]*Device),
 		container: container,
+		deviceDB:  deviceDB,
 		logger:    logger,
 	}, nil
 }
@@ -159,6 +169,13 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 			delete(m.devices, deviceID)
 			m.mu.Unlock()
 
+			// Delete device mapping from database
+			if err := m.deviceDB.DeleteMapping(deviceID); err != nil {
+				m.logger.Errorf("Failed to delete device mapping: %v", err)
+			} else {
+				m.logger.Infof("Deleted device mapping: %s", deviceID)
+			}
+
 			m.publishEvent("device.logout", map[string]interface{}{
 				"device_id": deviceID,
 				"reason":    v.Reason.String(),
@@ -186,16 +203,24 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 }
 
 // CreateDevice creates a new WhatsApp device and returns QR code
-func (m *Manager) CreateDevice(ctx context.Context) (*Device, error) {
+// If deviceID is empty, a new unique ID will be generated
+func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Generate a unique ID if not provided
+	if deviceID == "" {
+		deviceID = fmt.Sprintf("device_%d", len(m.devices)+1)
+	}
+
+	// Check if device ID already exists
+	if _, exists := m.devices[deviceID]; exists {
+		return nil, fmt.Errorf("device with ID %s already exists", deviceID)
+	}
 
 	// Create a new device store
 	deviceStore := m.container.NewDevice()
 	client := whatsmeow.NewClient(deviceStore, m.logger)
-
-	// Generate a unique ID for the device
-	deviceID := fmt.Sprintf("device_%d", len(m.devices)+1)
 
 	// Setup event handlers
 	m.setupEventHandlers(deviceID, client)
@@ -228,7 +253,13 @@ func (m *Manager) CreateDevice(ctx context.Context) (*Device, error) {
 	go func() {
 		for evt := range qrChan {
 			if evt.Event == "code" {
-				device.QRCode = base64.StdEncoding.EncodeToString([]byte(evt.Code))
+				// Generate QR code PNG image
+				qrPNG, err := qrcode.Encode(evt.Code, qrcode.High, 1024)
+				if err != nil {
+					m.logger.Errorf("Failed to generate QR code: %v", err)
+					continue
+				}
+				device.QRCode = base64.StdEncoding.EncodeToString(qrPNG)
 				device.Status = "qr_ready"
 
 				// Publish QR code ready event
@@ -242,6 +273,16 @@ func (m *Manager) CreateDevice(ctx context.Context) (*Device, error) {
 				m.devices[device.ID] = device
 				m.mu.Unlock()
 
+				// Save device mapping to database
+				if device.Client.Store.ID != nil {
+					deviceJID := device.Client.Store.ID.User
+					if err := m.deviceDB.SaveMapping(deviceID, deviceJID); err != nil {
+						m.logger.Errorf("Failed to save device mapping: %v", err)
+					} else {
+						m.logger.Infof("Saved device mapping: %s -> %s", deviceID, deviceJID)
+					}
+				}
+
 				// Publish device connected event
 				m.publishEvent("device.connected", map[string]interface{}{
 					"device_id": deviceID,
@@ -254,7 +295,13 @@ func (m *Manager) CreateDevice(ctx context.Context) (*Device, error) {
 	// Wait for initial QR code
 	for evt := range qrChan {
 		if evt.Event == "code" {
-			device.QRCode = base64.StdEncoding.EncodeToString([]byte(evt.Code))
+			// Generate QR code PNG image
+			qrPNG, err := qrcode.Encode(evt.Code, qrcode.High, 1024)
+			if err != nil {
+				m.logger.Errorf("Failed to generate QR code: %v", err)
+				continue
+			}
+			device.QRCode = base64.StdEncoding.EncodeToString(qrPNG)
 			device.Status = "qr_ready"
 			break
 		}
@@ -302,6 +349,89 @@ func (m *Manager) GetDevice(id string) (*Device, bool) {
 	return device, ok
 }
 
+// RestoreDevices recovers all previously connected devices from the database
+// This should be called on server startup to restore device connections
+func (m *Manager) RestoreDevices(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Get all device mappings from the database
+	mappings, err := m.deviceDB.GetAllMappings()
+	if err != nil {
+		return fmt.Errorf("failed to get device mappings: %w", err)
+	}
+
+	m.logger.Infof("Found %d device mapping(s), attempting to restore connections", len(mappings))
+
+	// Get all devices from WhatsApp store
+	allDevices, err := m.container.GetAllDevices(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get devices from WhatsApp store: %w", err)
+	}
+
+	// Create a map of JID to device store for quick lookup
+	deviceStoreMap := make(map[string]*store.Device)
+	for _, deviceStore := range allDevices {
+		if deviceStore.ID != nil {
+			deviceStoreMap[deviceStore.ID.User] = deviceStore
+		}
+	}
+
+	// Restore devices based on mappings
+	for _, mapping := range mappings {
+		deviceStore, exists := deviceStoreMap[mapping.DeviceJID]
+		if !exists {
+			m.logger.Warnf("Device mapping found but WhatsApp store missing: %s -> %s", mapping.DeviceID, mapping.DeviceJID)
+			continue
+		}
+
+		// Skip if device has no JID (never logged in)
+		if deviceStore.ID == nil {
+			m.logger.Debugf("Skipping device %s (never logged in)", mapping.DeviceID)
+			continue
+		}
+
+		// Create client for the stored device
+		client := whatsmeow.NewClient(deviceStore, m.logger)
+
+		// Setup event handlers
+		m.setupEventHandlers(mapping.DeviceID, client)
+
+		// Connect to WhatsApp
+		err := client.Connect()
+		if err != nil {
+			m.logger.Errorf("Failed to connect device %s: %v", mapping.DeviceID, err)
+
+			// Publish failed reconnection event
+			m.publishEvent("device.restore_failed", map[string]interface{}{
+				"device_id": mapping.DeviceID,
+				"error":     err.Error(),
+			})
+			continue
+		}
+
+		// Create device object
+		device := &Device{
+			ID:     mapping.DeviceID,
+			Client: client,
+			Status: "connected",
+		}
+
+		m.devices[mapping.DeviceID] = device
+		m.logger.Infof("Successfully restored device: %s (JID: %s)", mapping.DeviceID, mapping.DeviceJID)
+
+		// Publish device restored event
+		m.publishEvent("device.restored", map[string]interface{}{
+			"device_id":  mapping.DeviceID,
+			"device_jid": mapping.DeviceJID,
+			"status":     "connected",
+		})
+	}
+
+	m.logger.Infof("Device restoration complete. %d device(s) now active", len(m.devices))
+	return nil
+}
+
 // Close closes all devices and the manager
 func (m *Manager) Close() error {
 	m.mu.Lock()
@@ -310,6 +440,14 @@ func (m *Manager) Close() error {
 	for _, device := range m.devices {
 		device.Client.Disconnect()
 	}
+
+	// Close device database
+	if m.deviceDB != nil {
+		if err := m.deviceDB.Close(); err != nil {
+			return fmt.Errorf("failed to close device database: %w", err)
+		}
+	}
+
 	return nil
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,8 +10,10 @@ import (
 	"whatsapp/src/core/event"
 	httpgateway "whatsapp/src/core/gateway/http"
 	"whatsapp/src/core/whatsapp"
+	"whatsapp/src/plugins/webhook"
 
 	"github.com/ThreeDotsLabs/watermill"
+	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -33,6 +36,11 @@ func getEnvBool(key string, defaultValue bool) bool {
 }
 
 func main() {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Printf("No .env file found or error loading it: %v", err)
+	}
+
 	// Read configuration from environment
 	httpPort := getEnv("HTTP_PORT", "8081")
 	dbPath := getEnv("DB_PATH", "file:./whatsapp.db?_foreign_keys=on")
@@ -46,6 +54,14 @@ func main() {
 
 	// Create event bus
 	eventBus := event.NewEventBus(wmLogger)
+	webhookPlugin, err := webhook.NewPlugin(eventBus)
+	if err != nil {
+		log.Fatalf("Failed to initialize webhook plugin: %v", err)
+	}
+	// Start webhook plugin
+	if err := webhookPlugin.Start(); err != nil {
+		log.Fatalf("Failed to start webhook plugin: %v", err)
+	}
 	defer eventBus.Close()
 
 	// Create WhatsApp manager
@@ -57,6 +73,12 @@ func main() {
 
 	// Set event publisher
 	manager.SetEventPublisher(eventBus)
+
+	// Restore previously connected devices (failover recovery)
+	fmt.Println("Restoring previously connected devices...")
+	if err := manager.RestoreDevices(context.Background()); err != nil {
+		log.Printf("Warning: Failed to restore devices: %v", err)
+	}
 
 	// Create Fiber HTTP server
 	server := httpgateway.NewServer(manager)
