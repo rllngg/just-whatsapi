@@ -42,11 +42,13 @@ services:
   # Webhook receiver for testing
   webhook-receiver:
     build:
-      context: ./test
-      dockerfile: Dockerfile.webhook
+      context: ./webhook
+      dockerfile: Dockerfile
     container_name: whatsapp-webhook-receiver
     ports:
       - "3000:3000"
+    environment:
+      - PORT=3000
     networks:
       - whatsapp-network
     healthcheck:
@@ -58,7 +60,7 @@ services:
   # WhatsApp service
   whatsapp:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     container_name: whatsapp-service
     ports:
