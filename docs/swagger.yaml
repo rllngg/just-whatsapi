@@ -1,6 +1,30 @@
 basePath: /
 definitions:
+  whatsapp.CreateDeviceRequest:
+    properties:
+      device_id:
+        type: string
+    type: object
+  whatsapp.DeviceCreateResponse:
+    properties:
+      device_id:
+        type: string
+      qr_code:
+        type: string
+    type: object
+  whatsapp.DeviceInfo:
+    properties:
+      id:
+        type: string
+      status:
+        type: string
+    type: object
   whatsapp.MessageResponse:
+    properties:
+      message_id:
+        type: string
+    type: object
+  whatsapp.PresenceResponse:
     properties:
       message_id:
         type: string
@@ -103,8 +127,7 @@ paths:
           description: List of devices with id and status
           schema:
             items:
-              additionalProperties: true
-              type: object
+              $ref: '#/definitions/whatsapp.DeviceInfo'
             type: array
       summary: Get all devices
       tags:
@@ -113,12 +136,23 @@ paths:
     post:
       consumes:
       - application/json
-      description: Creates a new WhatsApp device and returns a QR code for authentication
+      description: Creates a new WhatsApp device and returns a QR code for authentication.
+        You can optionally provide a device_id, otherwise one will be auto-generated.
+      parameters:
+      - description: Device creation request
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/whatsapp.CreateDeviceRequest'
       produces:
       - application/json
       responses:
         "200":
-          description: Returns base64 encoded QR code
+          description: Returns device_id and base64 encoded QR code
+          schema:
+            $ref: '#/definitions/whatsapp.DeviceCreateResponse'
+        "400":
+          description: Invalid request or device ID already exists
           schema:
             additionalProperties:
               type: string
@@ -252,9 +286,7 @@ paths:
         "200":
           description: Presence sent successfully
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/whatsapp.PresenceResponse'
         "400":
           description: Invalid request body
           schema:
