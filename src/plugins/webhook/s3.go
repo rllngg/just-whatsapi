@@ -68,6 +68,10 @@ func (s *S3Client) UploadFile(ctx context.Context, data []byte, filename string,
 	timestamp := time.Now().Unix()
 	key := fmt.Sprintf("whatsapp-media/%d-%s", timestamp, filepath.Base(filename))
 
+	// Log upload details
+	fmt.Printf("[S3] Uploading file: %s (size: %d bytes, type: %s)\n", filename, len(data), contentType)
+	fmt.Printf("[S3] S3 key: %s, bucket: %s\n", key, s.bucket)
+
 	// Upload to S3
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
@@ -76,6 +80,7 @@ func (s *S3Client) UploadFile(ctx context.Context, data []byte, filename string,
 		ContentType: aws.String(contentType),
 	})
 	if err != nil {
+		fmt.Printf("[S3] Failed to upload file %s: %v\n", filename, err)
 		return "", fmt.Errorf("failed to upload to S3: %w", err)
 	}
 
@@ -87,5 +92,6 @@ func (s *S3Client) UploadFile(ctx context.Context, data []byte, filename string,
 		url = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.config.Region, key)
 	}
 
+	fmt.Printf("[S3] File uploaded successfully: %s -> %s\n", filename, url)
 	return url, nil
 }

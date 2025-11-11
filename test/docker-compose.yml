@@ -65,33 +65,33 @@ services:
       timeout: 5s
       retries: 3
 
-  # # WhatsApp service
-  # whatsapp:
-  #   build:
-  #     context: ..
-  #     dockerfile: Dockerfile
-  #   container_name: whatsapp-service
-  #   ports:
-  #     - "8080:8080"
-  #   environment:
-  #     - HTTP_PORT=8080
-  #     - PLUGINS_WEBHOOK_URL=http://webhook-receiver:3000/webhook
-  #     - PLUGINS_WEBHOOK_SECRET=your-secret-key
-  #     - PLUGINS_S3_ENDPOINT=http://minio:9000
-  #     - PLUGINS_S3_ACCESS_KEY=minioadmin
-  #     - PLUGINS_S3_SECRET_KEY=minioadmin
-  #     - PLUGINS_S3_BUCKET=whatsapp-media
-  #     - PLUGINS_S3_REGION=us-east-1
-  #     - PLUGINS_WEBHOOK_S3_ENABLED=true
-  #     - DATABASE_PATH=/data/whatsapp.db
-  #   volumes:
-  #     - whatsapp_data:/data
-  #   depends_on:
-  #     - minio
-  #     - webhook-receiver
-  #   networks:
-  #     - whatsapp-network
-  #   restart: unless-stopped
+   # WhatsApp service
+  whatsapp:
+     build:
+       context: ..
+       dockerfile: Dockerfile
+     container_name: whatsapp-service
+     ports:
+       - "8080:8080"
+     environment:
+       - HTTP_PORT=8080
+       - PLUGINS_WEBHOOK_URL=http://webhook-receiver:3000/webhook
+       - PLUGINS_WEBHOOK_SECRET=your-secret-key
+       - PLUGINS_S3_ENDPOINT=http://minio:9000
+       - PLUGINS_S3_ACCESS_KEY=minioadmin
+       - PLUGINS_S3_SECRET_KEY=minioadmin
+       - PLUGINS_S3_BUCKET=whatsapp-media
+       - PLUGINS_S3_REGION=us-east-1
+       - PLUGINS_WEBHOOK_S3_ENABLED=true
+       - DB_PATH=/data/whatsapp.db
+     volumes:
+       - whatsapp_data:/data
+     depends_on:
+       - minio
+       - webhook-receiver
+     networks:
+       - whatsapp-network
+     restart: unless-stopped
 
 volumes:
   minio_data:

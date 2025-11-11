@@ -100,11 +100,11 @@ func (ds *DeliveryService) deliver(ctx context.Context, wh *WebhookQueue) error 
 		return fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
 
-	// Create webhook payload with timestamp
-	webhookPayload := map[string]interface{}{
-		"event":     wh.Event,
-		"payload":   payload,
-		"timestamp": time.Now().Unix(),
+	// Create webhook payload with timestamp using DTO
+	webhookPayload := WebhookPayload{
+		Event:     wh.Event,
+		Payload:   payload,
+		Timestamp: time.Now().Unix(),
 	}
 
 	// Marshal to JSON
@@ -112,6 +112,10 @@ func (ds *DeliveryService) deliver(ctx context.Context, wh *WebhookQueue) error 
 	if err != nil {
 		return fmt.Errorf("failed to marshal webhook payload: %w", err)
 	}
+
+	// Log webhook details
+	fmt.Printf("[WEBHOOK] Sending webhook to URL: %s\n", wh.WebhookURL)
+	fmt.Printf("[WEBHOOK] Event: %s, Payload: %s\n", wh.Event, string(body))
 
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", wh.WebhookURL, bytes.NewReader(body))
@@ -125,15 +129,18 @@ func (ds *DeliveryService) deliver(ctx context.Context, wh *WebhookQueue) error 
 	// Send request
 	resp, err := ds.httpClient.Do(req)
 	if err != nil {
+		fmt.Printf("[WEBHOOK] Failed to send webhook: %v\n", err)
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Check response status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		fmt.Printf("[WEBHOOK] Webhook failed with status: %d\n", resp.StatusCode)
 		return fmt.Errorf("webhook returned non-2xx status: %d", resp.StatusCode)
 	}
 
+	fmt.Printf("[WEBHOOK] Webhook delivered successfully, status: %d\n", resp.StatusCode)
 	return nil
 }
 

@@ -71,73 +71,73 @@ func (m *Manager) SetEventPublisher(publisher EventPublisher) {
 }
 
 // extractMessagePayload extracts message details from WhatsApp event
-func (m *Manager) extractMessagePayload(v *events.Message) map[string]interface{} {
-	payload := map[string]interface{}{
-		"message_id": v.Info.ID,
-		"chat_id":    v.Info.Chat.String(),
-		"sender":     v.Info.Sender.String(),
-		"timestamp":  v.Info.Timestamp.Unix(),
-		"from_me":    v.Info.IsFromMe,
+func (m *Manager) extractMessagePayload(v *events.Message) MessagePayload {
+	payload := MessagePayload{
+		MessageID: v.Info.ID,
+		ChatID:    v.Info.Chat.String(),
+		Sender:    v.Info.Sender.String(),
+		Timestamp: v.Info.Timestamp.Unix(),
+		FromMe:    v.Info.IsFromMe,
 	}
 
 	// Extract message content based on type
 	msg := v.Message
 	if msg.Conversation != nil {
-		payload["type"] = "text"
-		payload["text"] = map[string]interface{}{
-			"content": *msg.Conversation,
+		payload.Type = "text"
+		payload.Text = &TextContent{
+			Content: *msg.Conversation,
 		}
 	} else if msg.ExtendedTextMessage != nil && msg.ExtendedTextMessage.Text != nil {
-		payload["type"] = "text"
-		payload["text"] = map[string]interface{}{
-			"content": *msg.ExtendedTextMessage.Text,
+		payload.Type = "text"
+		payload.Text = &TextContent{
+			Content: *msg.ExtendedTextMessage.Text,
 		}
 	} else if msg.ImageMessage != nil {
-		payload["type"] = "image"
-		imageInfo := map[string]interface{}{
-			"mimetype": msg.ImageMessage.GetMimetype(),
-			"caption":  msg.ImageMessage.GetCaption(),
+		payload.Type = "image"
+		imageInfo := &ImageContent{
+			Mimetype: msg.ImageMessage.GetMimetype(),
+			Caption:  msg.ImageMessage.GetCaption(),
 		}
 		if msg.ImageMessage.URL != nil {
-			imageInfo["url"] = *msg.ImageMessage.URL
+			imageInfo.URL = *msg.ImageMessage.URL
 		}
-		payload["image"] = imageInfo
-		payload["has_media"] = true
+		payload.Image = imageInfo
+		payload.HasMedia = true
 	} else if msg.DocumentMessage != nil {
-		payload["type"] = "document"
-		docInfo := map[string]interface{}{
-			"mimetype": msg.DocumentMessage.GetMimetype(),
-			"caption":  msg.DocumentMessage.GetCaption(),
-			"filename": msg.DocumentMessage.GetFileName(),
+		payload.Type = "document"
+		docInfo := &DocumentContent{
+			Mimetype: msg.DocumentMessage.GetMimetype(),
+			Caption:  msg.DocumentMessage.GetCaption(),
+			Filename: msg.DocumentMessage.GetFileName(),
 		}
 		if msg.DocumentMessage.URL != nil {
-			docInfo["url"] = *msg.DocumentMessage.URL
+			docInfo.URL = *msg.DocumentMessage.URL
 		}
-		payload["document"] = docInfo
-		payload["has_media"] = true
+		payload.Document = docInfo
+		payload.HasMedia = true
 	} else if msg.VideoMessage != nil {
-		payload["type"] = "video"
-		videoInfo := map[string]interface{}{
-			"mimetype": msg.VideoMessage.GetMimetype(),
-			"caption":  msg.VideoMessage.GetCaption(),
+		payload.Type = "video"
+		videoInfo := &VideoContent{
+			Mimetype: msg.VideoMessage.GetMimetype(),
+			Caption:  msg.VideoMessage.GetCaption(),
 		}
 		if msg.VideoMessage.URL != nil {
-			videoInfo["url"] = *msg.VideoMessage.URL
+			videoInfo.URL = *msg.VideoMessage.URL
 		}
-		payload["video"] = videoInfo
-		payload["has_media"] = true
+		payload.Video = videoInfo
+		payload.HasMedia = true
 	} else if msg.AudioMessage != nil {
-		payload["type"] = "audio"
-		audioInfo := map[string]interface{}{
-			"mimetype": msg.AudioMessage.GetMimetype(),
+		payload.Type = "audio"
+		audioInfo := &AudioContent{
+			Mimetype: msg.AudioMessage.GetMimetype(),
 		}
 		if msg.AudioMessage.URL != nil {
-			audioInfo["url"] = *msg.AudioMessage.URL
+			audioInfo.URL = *msg.AudioMessage.URL
 		}
-		payload["audio"] = audioInfo
-		payload["has_media"] = true
+		payload.Audio = audioInfo
+		payload.HasMedia = true
 	} else {
-		payload["type"] = "unknown"
+		payload.Type = "unknown"
 	}
 
 	return payload
@@ -150,17 +150,17 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 		case *events.Message:
 			// Handle incoming message from WhatsApp
 			messagePayload := m.extractMessagePayload(v)
-			m.publishEvent("message.received", map[string]interface{}{
-				"device_id": deviceID,
-				"message":   messagePayload,
-				"source":    "whatsapp",
+			m.publishEvent("message.received", MessageReceivedEvent{
+				DeviceID: deviceID,
+				Message:  messagePayload,
+				Source:   "whatsapp",
 			})
 
 		case *events.Disconnected:
 			// Handle device disconnect (internet issue)
-			m.publishEvent("device.disconnected", map[string]interface{}{
-				"device_id": deviceID,
-				"reason":    "connection_lost",
+			m.publishEvent("device.disconnected", DeviceDisconnectedEvent{
+				DeviceID: deviceID,
+				Reason:   "connection_lost",
 			})
 
 		case *events.LoggedOut:
@@ -176,27 +176,32 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 				m.logger.Infof("Deleted device mapping: %s", deviceID)
 			}
 
-			m.publishEvent("device.logout", map[string]interface{}{
-				"device_id": deviceID,
-				"reason":    v.Reason.String(),
+			m.publishEvent("device.logout", DeviceLogoutEvent{
+				DeviceID: deviceID,
+				Reason:   v.Reason.String(),
 			})
 
 		case *events.Connected:
 			// Handle successful connection
-			m.publishEvent("device.connected", map[string]interface{}{
-				"device_id": deviceID,
-				"status":    "connected",
+			deviceJID := ""
+			if client.Store.ID != nil {
+				deviceJID = client.Store.ID.User
+			}
+			m.publishEvent("device.connected", DeviceConnectedEvent{
+				DeviceID:  deviceID,
+				DeviceJID: deviceJID,
+				Status:    "connected",
 			})
 
 		case *events.Receipt:
 			// Handle read receipts
-			m.publishEvent("message.read", map[string]interface{}{
-				"device_id":   deviceID,
-				"chat_id":     v.Chat.String(),
-				"sender":      v.Sender.String(),
-				"message_ids": v.MessageIDs,
-				"timestamp":   v.Timestamp.Unix(),
-				"type":        v.Type.GoString(),
+			m.publishEvent("message.read", MessageReadEvent{
+				DeviceID:   deviceID,
+				ChatID:     v.Chat.String(),
+				Sender:     v.Sender.String(),
+				MessageIDs: v.MessageIDs,
+				Timestamp:  v.Timestamp.Unix(),
+				Type:       v.Type.GoString(),
 			})
 		}
 	})
@@ -244,9 +249,9 @@ func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, e
 	}
 
 	// Publish device created event
-	m.publishEvent("device.created", map[string]interface{}{
-		"device_id": deviceID,
-		"status":    "pending",
+	m.publishEvent("device.created", DeviceCreatedEvent{
+		DeviceID: deviceID,
+		Status:   "pending",
 	})
 
 	// Wait for QR code
@@ -263,9 +268,9 @@ func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, e
 				device.Status = "qr_ready"
 
 				// Publish QR code ready event
-				m.publishEvent("device.qr_ready", map[string]interface{}{
-					"device_id": deviceID,
-					"status":    "qr_ready",
+				m.publishEvent("device.qr_ready", DeviceQRReadyEvent{
+					DeviceID: deviceID,
+					Status:   "qr_ready",
 				})
 			} else if evt.Event == "success" {
 				device.Status = "connected"
@@ -274,8 +279,9 @@ func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, e
 				m.mu.Unlock()
 
 				// Save device mapping to database
+				deviceJID := ""
 				if device.Client.Store.ID != nil {
-					deviceJID := device.Client.Store.ID.User
+					deviceJID = device.Client.Store.ID.User
 					if err := m.deviceDB.SaveMapping(deviceID, deviceJID); err != nil {
 						m.logger.Errorf("Failed to save device mapping: %v", err)
 					} else {
@@ -284,9 +290,10 @@ func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, e
 				}
 
 				// Publish device connected event
-				m.publishEvent("device.connected", map[string]interface{}{
-					"device_id": deviceID,
-					"status":    "connected",
+				m.publishEvent("device.connected", DeviceConnectedEvent{
+					DeviceID:  deviceID,
+					DeviceJID: deviceJID,
+					Status:    "connected",
 				})
 			}
 		}
@@ -311,7 +318,7 @@ func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, e
 }
 
 // publishEvent publishes an event to the event bus
-func (m *Manager) publishEvent(topic string, payload map[string]interface{}) {
+func (m *Manager) publishEvent(topic string, payload interface{}) {
 	if m.publisher == nil {
 		return
 	}
@@ -403,9 +410,9 @@ func (m *Manager) RestoreDevices(ctx context.Context) error {
 			m.logger.Errorf("Failed to connect device %s: %v", mapping.DeviceID, err)
 
 			// Publish failed reconnection event
-			m.publishEvent("device.restore_failed", map[string]interface{}{
-				"device_id": mapping.DeviceID,
-				"error":     err.Error(),
+			m.publishEvent("device.restore_failed", DeviceRestoreFailedEvent{
+				DeviceID: mapping.DeviceID,
+				Error:    err.Error(),
 			})
 			continue
 		}
@@ -421,10 +428,10 @@ func (m *Manager) RestoreDevices(ctx context.Context) error {
 		m.logger.Infof("Successfully restored device: %s (JID: %s)", mapping.DeviceID, mapping.DeviceJID)
 
 		// Publish device restored event
-		m.publishEvent("device.restored", map[string]interface{}{
-			"device_id":  mapping.DeviceID,
-			"device_jid": mapping.DeviceJID,
-			"status":     "connected",
+		m.publishEvent("device.restored", DeviceRestoredEvent{
+			DeviceID:  mapping.DeviceID,
+			DeviceJID: mapping.DeviceJID,
+			Status:    "connected",
 		})
 	}
 
@@ -523,20 +530,20 @@ func (m *Manager) SendTextMessage(ctx context.Context, req SendTextMessageReques
 
 	resp, err := device.Client.SendMessage(ctx, jid, msg)
 	if err != nil {
-		m.publishEvent("message.text.failed", map[string]interface{}{
-			"device_id": req.DeviceID,
-			"chat_id":   req.ChatID,
-			"error":     err.Error(),
+		m.publishEvent("message.text.failed", MessageTextFailedEvent{
+			DeviceID: req.DeviceID,
+			ChatID:   req.ChatID,
+			Error:    err.Error(),
 		})
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
 
 	// Publish event for message sent from HTTP handler
-	m.publishEvent("message.text.sent", map[string]interface{}{
-		"device_id":  req.DeviceID,
-		"chat_id":    req.ChatID,
-		"message_id": resp.ID,
-		"source":     "http",
+	m.publishEvent("message.text.sent", MessageTextSentEvent{
+		DeviceID:  req.DeviceID,
+		ChatID:    req.ChatID,
+		MessageID: resp.ID,
+		Source:    "http",
 	})
 
 	return &MessageResponse{
@@ -590,20 +597,20 @@ func (m *Manager) SendImageMessage(ctx context.Context, req SendImageMessageRequ
 
 	resp, err := device.Client.SendMessage(ctx, jid, msg)
 	if err != nil {
-		m.publishEvent("message.image.failed", map[string]interface{}{
-			"device_id": req.DeviceID,
-			"chat_id":   req.ChatID,
-			"error":     err.Error(),
+		m.publishEvent("message.image.failed", MessageImageFailedEvent{
+			DeviceID: req.DeviceID,
+			ChatID:   req.ChatID,
+			Error:    err.Error(),
 		})
 		return nil, fmt.Errorf("failed to send image: %w", err)
 	}
 
 	// Publish event for image message sent from HTTP handler
-	m.publishEvent("message.image.sent", map[string]interface{}{
-		"device_id":  req.DeviceID,
-		"chat_id":    req.ChatID,
-		"message_id": resp.ID,
-		"source":     "http",
+	m.publishEvent("message.image.sent", MessageImageSentEvent{
+		DeviceID:  req.DeviceID,
+		ChatID:    req.ChatID,
+		MessageID: resp.ID,
+		Source:    "http",
 	})
 
 	return &MessageResponse{
@@ -656,20 +663,20 @@ func (m *Manager) SendFileMessage(ctx context.Context, req SendFileMessageReques
 
 	resp, err := device.Client.SendMessage(ctx, jid, msg)
 	if err != nil {
-		m.publishEvent("message.file.failed", map[string]interface{}{
-			"device_id": req.DeviceID,
-			"chat_id":   req.ChatID,
-			"error":     err.Error(),
+		m.publishEvent("message.file.failed", MessageFileFailedEvent{
+			DeviceID: req.DeviceID,
+			ChatID:   req.ChatID,
+			Error:    err.Error(),
 		})
 		return nil, fmt.Errorf("failed to send file: %w", err)
 	}
 
 	// Publish event for file message sent from HTTP handler
-	m.publishEvent("message.file.sent", map[string]interface{}{
-		"device_id":  req.DeviceID,
-		"chat_id":    req.ChatID,
-		"message_id": resp.ID,
-		"source":     "http",
+	m.publishEvent("message.file.sent", MessageFileSentEvent{
+		DeviceID:  req.DeviceID,
+		ChatID:    req.ChatID,
+		MessageID: resp.ID,
+		Source:    "http",
 	})
 
 	return &MessageResponse{
@@ -691,27 +698,27 @@ func (m *Manager) SendPresence(ctx context.Context, req SendPresenceRequest) err
 
 	err = device.Client.SendPresence(ctx, types.PresenceAvailable)
 	if err != nil {
-		m.publishEvent("message.presence.failed", map[string]interface{}{
-			"device_id": req.DeviceID,
-			"chat_id":   req.ChatID,
-			"error":     err.Error(),
+		m.publishEvent("message.presence.failed", MessagePresenceFailedEvent{
+			DeviceID: req.DeviceID,
+			ChatID:   req.ChatID,
+			Error:    err.Error(),
 		})
 		return fmt.Errorf("failed to send presence: %w", err)
 	}
 
 	err = device.Client.SendChatPresence(ctx, jid, types.ChatPresenceComposing, types.ChatPresenceMediaText)
 	if err != nil {
-		m.publishEvent("message.presence.failed", map[string]interface{}{
-			"device_id": req.DeviceID,
-			"chat_id":   req.ChatID,
-			"error":     err.Error(),
+		m.publishEvent("message.presence.failed", MessagePresenceFailedEvent{
+			DeviceID: req.DeviceID,
+			ChatID:   req.ChatID,
+			Error:    err.Error(),
 		})
 		return fmt.Errorf("failed to send chat presence: %w", err)
 	}
 
-	m.publishEvent("message.presence.sent", map[string]interface{}{
-		"device_id": req.DeviceID,
-		"chat_id":   req.ChatID,
+	m.publishEvent("message.presence.sent", MessagePresenceSentEvent{
+		DeviceID: req.DeviceID,
+		ChatID:   req.ChatID,
 	})
 
 	return nil
@@ -743,20 +750,20 @@ func (m *Manager) SendReaction(ctx context.Context, req SendReactionRequest) (*M
 
 	resp, err := device.Client.SendMessage(ctx, jid, msg)
 	if err != nil {
-		m.publishEvent("message.reaction.failed", map[string]interface{}{
-			"device_id":  req.DeviceID,
-			"chat_id":    req.ChatID,
-			"message_id": req.MessageID,
-			"error":      err.Error(),
+		m.publishEvent("message.reaction.failed", MessageReactionFailedEvent{
+			DeviceID:  req.DeviceID,
+			ChatID:    req.ChatID,
+			MessageID: req.MessageID,
+			Error:     err.Error(),
 		})
 		return nil, fmt.Errorf("failed to send reaction: %w", err)
 	}
 
-	m.publishEvent("message.reaction.sent", map[string]interface{}{
-		"device_id":        req.DeviceID,
-		"chat_id":          req.ChatID,
-		"target_message":   req.MessageID,
-		"reaction_message": resp.ID,
+	m.publishEvent("message.reaction.sent", MessageReactionSentEvent{
+		DeviceID:        req.DeviceID,
+		ChatID:          req.ChatID,
+		TargetMessage:   req.MessageID,
+		ReactionMessage: resp.ID,
 	})
 
 	return &MessageResponse{

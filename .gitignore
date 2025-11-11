@@ -34,6 +34,9 @@ vendor/
 *.swo
 *~
 
+
+# Fly io
+*.toml
 # OS files
 .DS_Store
 Thumbs.db
