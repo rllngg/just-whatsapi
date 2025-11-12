@@ -10,6 +10,7 @@ import (
 	"whatsapp/src/core/event"
 	httpgateway "whatsapp/src/core/gateway/http"
 	"whatsapp/src/core/whatsapp"
+	"whatsapp/src/plugins/renr"
 	"whatsapp/src/plugins/webhook"
 
 	"github.com/ThreeDotsLabs/watermill"
@@ -43,7 +44,7 @@ func main() {
 
 	// Read configuration from environment
 	httpPort := getEnv("HTTP_PORT", "8081")
-	dbPath := getEnv("DB_PATH", "file:./whatsapp.db?_foreign_keys=on")
+	dbPath := getEnv("DB_PATH", "file:./whatsapp.db?_foreign_keys=on&mode=rwc")
 	logLevel := getEnv("WHATSAPP_LOG_LEVEL", "INFO")
 	wmDebug := getEnvBool("WATERMILL_DEBUG", false)
 	wmTrace := getEnvBool("WATERMILL_TRACE", false)
@@ -78,6 +79,22 @@ func main() {
 	fmt.Println("Restoring previously connected devices...")
 	if err := manager.RestoreDevices(context.Background()); err != nil {
 		log.Printf("Warning: Failed to restore devices: %v", err)
+	}
+
+	// Initialize Renr queue plugin
+	fmt.Println("Initializing Renr queue plugin...")
+	renrPlugin, err := renr.NewPlugin(manager, eventBus, waLogger)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize Renr plugin: %v", err)
+		log.Printf("The application will continue without queue integration")
+	} else {
+		if err := renrPlugin.Start(); err != nil {
+			log.Printf("Warning: Failed to start Renr plugin: %v", err)
+			log.Printf("The application will continue without queue integration")
+		} else {
+			defer renrPlugin.Stop()
+			fmt.Println("Renr queue plugin started successfully")
+		}
 	}
 
 	// Create Fiber HTTP server
