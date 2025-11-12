@@ -1,0 +1,688 @@
+openapi: 3.0.3
+info:
+  title: Queue System API
+  description: |
+    Internal message queue system with retry and dead letter support.
+
+    ## Authentication
+    All endpoints require HTTP Basic Authentication. Include credentials in the Authorization header:
+    ```
+    Authorization: Basic <base64(username:password)>
+    ```
+
+    Example using curl:
+    ```bash
+    curl -u username:password https://api.renr.biz.id/system/queue/email
+    ```
+
+    ## Features
+    - **Persistent storage**: Messages stored in PostgreSQL
+    - **Retry mechanism**: Automatic retry with exponential backoff
+    - **Dead letter queue**: Failed messages (FAILED status) after max retries
+    - **Reference tracking**: Optional ref parameter for message correlation
+    - **Timeout support**: Messages can expire after specified duration
+
+    ## Queue States
+    - `PENDING`: Message waiting to be processed
+    - `PROCESSING`: Message currently being processed (pulled)
+    - `COMPLETED`: Message successfully processed
+    - `FAILED`: Message failed after max retries (dead letter)
+
+    ## Retry Strategy
+    - Retry 1: 30 seconds delay
+    - Retry 2: 5 minutes delay (150s)
+    - Retry 3: 15 minutes delay (750s)
+    - After 3 retries: Marked as FAILED (dead letter)
+
+  version: 1.0.0
+  contact:
+    name: Omni Support
+    email: support@renr.biz.id
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.renr.biz.id
+    description: Production server
+
+security:
+  - basicAuth: []
+
+tags:
+  - name: Queue Operations
+    description: Basic queue operations (enqueue, pull, complete, fail)
+  - name: Dead Letter Queue
+    description: Failed messages management
+  - name: Monitoring
+    description: Queue statistics and monitoring
+
+paths:
+  /system/queue/{topic}:
+    post:
+      tags:
+        - Queue Operations
+      summary: Enqueue a message
+      description: |
+        Add a new message to the queue for the specified topic.
+
+        - Message will have status `PENDING`
+        - Optional `ref` parameter for correlation/deduplication
+        - Optional `timeoutInSeconds` for message expiration
+      operationId: enqueueMessage
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          description: Queue topic name (e.g., "email", "sms", "notification")
+          schema:
+            type: string
+            example: email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnqueueRequest'
+            examples:
+              simple:
+                summary: Simple message
+                value:
+                  payload: '{"to": "user@example.com", "subject": "Hello"}'
+              with_ref:
+                summary: Message with reference
+                value:
+                  ref: order-12345
+                  payload: '{"orderId": 12345, "status": "shipped"}'
+              with_timeout:
+                summary: Message with 1 hour timeout
+                value:
+                  ref: temp-job-456
+                  payload: '{"jobId": 456}'
+                  timeoutInSeconds: 3600
+      responses:
+        '201':
+          description: Message enqueued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueItemResponse'
+              example:
+                id: 123
+                topic: email
+                ref: order-12345
+                status: PENDING
+                retryCount: 0
+                createdDate: '2025-11-12T10:00:00Z'
+                expiredAt: null
+        '400':
+          description: Bad request (invalid payload)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized (missing or invalid credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                timestamp: '2025-11-12T10:00:00Z'
+                status: 401
+                error: Unauthorized
+                message: Full authentication is required to access this resource
+                path: /system/queue/email
+
+  /system/queue/{topic}/pull:
+    get:
+      tags:
+        - Queue Operations
+      summary: Pull and acknowledge next message
+      description: |
+        Retrieve the next pending message from the queue and automatically mark it as PROCESSING.
+
+        - Returns oldest PENDING message first (FIFO)
+        - Automatically changes status to PROCESSING
+        - Uses pessimistic locking to prevent concurrent pulls
+        - Skips messages with future `nextRetryAt` timestamp
+        - Returns 204 if no messages available
+
+        **Important**: After pulling, you must either call `/complete` or `/failed` endpoint.
+      operationId: pullMessage
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          description: Queue topic name
+          schema:
+            type: string
+            example: email
+        - name: ref
+          in: query
+          required: false
+          description: Optional reference ID to pull specific message
+          schema:
+            type: string
+            example: order-12345
+      responses:
+        '200':
+          description: Message pulled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueItemResponse'
+              example:
+                id: 123
+                topic: email
+                ref: order-12345
+                payload: '{"to": "user@example.com", "subject": "Hello"}'
+                status: PROCESSING
+                retryCount: 0
+                createdDate: '2025-11-12T10:00:00Z'
+                expiredAt: null
+        '204':
+          description: No messages available in queue
+        '404':
+          description: Topic not found or no matching ref
+
+  /system/queue/{topic}/{id}/complete:
+    post:
+      tags:
+        - Queue Operations
+      summary: Mark message as completed
+      description: |
+        Mark a message as successfully processed.
+
+        - Changes status from PROCESSING to COMPLETED
+        - Cannot complete already completed messages
+      operationId: completeMessage
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+            example: email
+        - name: id
+          in: path
+          required: true
+          description: Queue item ID
+          schema:
+            type: integer
+            format: int64
+            example: 123
+      responses:
+        '200':
+          description: Message marked as completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueItemResponse'
+              example:
+                id: 123
+                topic: email
+                status: COMPLETED
+                retryCount: 0
+                createdDate: '2025-11-12T10:00:00Z'
+        '404':
+          description: Message not found
+        '409':
+          description: Message already completed or not in PROCESSING state
+
+  /system/queue/{topic}/{id}/failed:
+    post:
+      tags:
+        - Queue Operations
+      summary: Mark message as failed with automatic retry
+      description: |
+        Mark a message as failed and automatically create retry if retries available.
+
+        **Retry Logic**:
+        1. If `retryCount < maxRetries`: Creates new PENDING message with delay
+        2. If `retryCount >= maxRetries`: Marks as FAILED (dead letter)
+
+        **Exponential Backoff**:
+        - Retry 1: 30 seconds
+        - Retry 2: 150 seconds (2.5 minutes)
+        - Retry 3: 750 seconds (12.5 minutes)
+
+        **Response Fields**:
+        - `willRetry`: true if retry created, false if moved to dead letter
+        - `newQueueItemId`: ID of retry message (if created)
+        - `nextRetryAt`: Scheduled retry time (if applicable)
+      operationId: markAsFailed
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+            example: email
+        - name: id
+          in: path
+          required: true
+          description: Queue item ID
+          schema:
+            type: integer
+            format: int64
+            example: 123
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkFailedRequest'
+            example:
+              reason: Connection timeout after 30 seconds
+      responses:
+        '200':
+          description: Message marked as failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueFailureResult'
+              examples:
+                with_retry:
+                  summary: Failed with retry scheduled
+                  value:
+                    id: 123
+                    status: FAILED
+                    response: 'Connection timeout after 30 seconds'
+                    retryCount: 1
+                    willRetry: true
+                    nextRetryAt: '2025-11-12T10:00:30Z'
+                    newQueueItemId: 124
+                max_retries:
+                  summary: Failed - max retries exceeded (dead letter)
+                  value:
+                    id: 123
+                    status: FAILED
+                    response: 'Max retries exceeded: Connection timeout'
+                    retryCount: 3
+                    willRetry: false
+                    nextRetryAt: null
+                    newQueueItemId: null
+        '404':
+          description: Message not found
+
+  /system/queue/{topic}/stats:
+    get:
+      tags:
+        - Monitoring
+      summary: Get queue statistics
+      description: |
+        Retrieve statistics for a specific queue topic.
+
+        **Metrics**:
+        - `pending`: Messages waiting to be processed
+        - `processing`: Messages currently being processed
+        - `completed`: Successfully processed messages
+        - `failed`: Dead letter queue (failed after max retries)
+      operationId: getQueueStats
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+            example: email
+      responses:
+        '200':
+          description: Queue statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStats'
+              example:
+                topic: email
+                pending: 150
+                processing: 5
+                completed: 10523
+                failed: 23
+
+  /system/queue/{topic}/failed:
+    get:
+      tags:
+        - Dead Letter Queue
+      summary: List failed messages (dead letter queue)
+      description: |
+        Retrieve all failed messages for a topic (dead letter queue).
+
+        These are messages that:
+        - Failed after exhausting all retry attempts
+        - Have status = FAILED
+        - Can be manually retried using the retry endpoint
+      operationId: getFailedMessages
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+            example: email
+        - name: page
+          in: query
+          required: false
+          description: Page number (0-indexed)
+          schema:
+            type: integer
+            default: 0
+            example: 0
+        - name: size
+          in: query
+          required: false
+          description: Page size
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+            example: 20
+      responses:
+        '200':
+          description: Failed messages list (paginated)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedQueueItems'
+              example:
+                content:
+                  - id: 456
+                    topic: email
+                    ref: order-456
+                    status: FAILED
+                    response: 'Max retries exceeded: SMTP connection refused'
+                    retryCount: 3
+                    createdDate: '2025-11-12T08:00:00Z'
+                  - id: 789
+                    topic: email
+                    ref: order-789
+                    status: FAILED
+                    response: 'Invalid email address format'
+                    retryCount: 3
+                    createdDate: '2025-11-12T07:30:00Z'
+                totalElements: 23
+                totalPages: 2
+                currentPage: 0
+                pageSize: 20
+
+  /system/queue/{topic}/{id}/retry:
+    post:
+      tags:
+        - Dead Letter Queue
+      summary: Retry a failed message manually
+      description: |
+        Manually retry a failed message from the dead letter queue.
+
+        **Behavior**:
+        - Creates new PENDING message with same payload
+        - Resets retry count to 0 (fresh start)
+        - Original failed message remains as-is for audit trail
+        - Only FAILED messages can be retried
+      operationId: retryFailedMessage
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+            example: email
+        - name: id
+          in: path
+          required: true
+          description: Failed message ID to retry
+          schema:
+            type: integer
+            format: int64
+            example: 456
+      responses:
+        '200':
+          description: Message retry scheduled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetryResult'
+              example:
+                originalId: 456
+                newQueueItem:
+                  id: 890
+                  topic: email
+                  ref: order-456
+                  payload: '{"to": "user@example.com"}'
+                  status: PENDING
+                  retryCount: 0
+                  createdDate: '2025-11-12T11:00:00Z'
+        '400':
+          description: Cannot retry non-FAILED message
+        '404':
+          description: Message not found
+
+components:
+  schemas:
+    EnqueueRequest:
+      type: object
+      required:
+        - payload
+      properties:
+        ref:
+          type: string
+          nullable: true
+          description: Optional reference ID for message correlation
+          example: order-12345
+        payload:
+          type: string
+          description: Message payload (typically JSON string)
+          example: '{"to": "user@example.com", "subject": "Order Confirmation"}'
+        timeoutInSeconds:
+          type: integer
+          nullable: true
+          description: Message expiration timeout in seconds
+          minimum: 1
+          example: 3600
+
+    MarkFailedRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: Failure reason description
+          minLength: 1
+          maxLength: 1000
+          example: Connection timeout after 30 seconds
+
+    QueueItemResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Queue item unique ID
+          example: 123
+        topic:
+          type: string
+          description: Queue topic name
+          example: email
+        ref:
+          type: string
+          nullable: true
+          description: Optional reference ID
+          example: order-12345
+        payload:
+          type: string
+          nullable: true
+          description: Message payload (null in list views for performance)
+          example: '{"to": "user@example.com"}'
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, COMPLETED, FAILED]
+          description: Current message status
+          example: PENDING
+        retryCount:
+          type: integer
+          description: Number of retry attempts made
+          minimum: 0
+          example: 0
+        createdDate:
+          type: string
+          format: date-time
+          description: Message creation timestamp (UTC)
+          example: '2025-11-12T10:00:00Z'
+        expiredAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Message expiration timestamp (UTC)
+          example: '2025-11-12T11:00:00Z'
+        response:
+          type: string
+          nullable: true
+          description: Response or error message (for FAILED status)
+          example: Connection timeout
+
+    QueueFailureResult:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Failed message ID
+          example: 123
+        status:
+          type: string
+          enum: [FAILED]
+          description: Always FAILED
+          example: FAILED
+        response:
+          type: string
+          description: Failure reason
+          example: Connection timeout after 30 seconds
+        retryCount:
+          type: integer
+          description: Current retry count
+          example: 1
+        willRetry:
+          type: boolean
+          description: Whether retry was scheduled
+          example: true
+        nextRetryAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Scheduled retry time (if willRetry = true)
+          example: '2025-11-12T10:00:30Z'
+        newQueueItemId:
+          type: integer
+          format: int64
+          nullable: true
+          description: ID of newly created retry message (if willRetry = true)
+          example: 124
+
+    QueueStats:
+      type: object
+      properties:
+        topic:
+          type: string
+          description: Queue topic name
+          example: email
+        pending:
+          type: integer
+          format: int64
+          description: Number of pending messages
+          example: 150
+        processing:
+          type: integer
+          format: int64
+          description: Number of messages being processed
+          example: 5
+        completed:
+          type: integer
+          format: int64
+          description: Number of completed messages
+          example: 10523
+        failed:
+          type: integer
+          format: int64
+          description: Number of failed messages (dead letter queue)
+          example: 23
+
+    RetryResult:
+      type: object
+      properties:
+        originalId:
+          type: integer
+          format: int64
+          description: Original failed message ID
+          example: 456
+        newQueueItem:
+          $ref: '#/components/schemas/QueueItemResponse'
+
+    PagedQueueItems:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueueItemResponse'
+        totalElements:
+          type: integer
+          format: int64
+          description: Total number of items
+          example: 23
+        totalPages:
+          type: integer
+          description: Total number of pages
+          example: 2
+        currentPage:
+          type: integer
+          description: Current page number (0-indexed)
+          example: 0
+        pageSize:
+          type: integer
+          description: Items per page
+          example: 20
+
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: '2025-11-12T10:00:00Z'
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: Bad Request
+        message:
+          type: string
+          example: Payload is required
+        path:
+          type: string
+          example: /system/queue/email
+
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: |
+        HTTP Basic Authentication. Provide username and password credentials.
+
+        **Example Request Headers:**
+        ```
+        Authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=
+        ```
+
+        **Using curl:**
+        ```bash
+        curl -u username:password https://api.renr.biz.id/system/queue/email
+        ```
+
+        **Using JavaScript fetch:**
+        ```javascript
+        const headers = new Headers();
+        headers.set('Authorization', 'Basic ' + btoa('username:password'));
+        fetch('https://api.renr.biz.id/system/queue/email', { headers });
+        ```

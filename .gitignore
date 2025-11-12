@@ -1,6 +1,7 @@
 # Binaries (root level only)
 /whatsapp
 /whatsapp-server
+/whatsapp-gateway
 /data
 
 # Database
