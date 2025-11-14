@@ -53,6 +53,24 @@ type DeviceRestoreFailedEvent struct {
 
 // Message Events
 
+// MediaData contains downloaded media content from WhatsApp
+// This struct provides the actual media bytes along with metadata,
+// enabling plugins to handle media without downloading from WhatsApp URLs
+type MediaData struct {
+	// Data is the raw bytes of the media file
+	Data []byte `json:"data,omitempty"`
+	// Mimetype is the detected MIME type (e.g., "image/jpeg", "video/mp4")
+	Mimetype string `json:"mimetype"`
+	// Filename is the suggested filename with extension
+	Filename string `json:"filename"`
+	// Size is the size of the media in bytes
+	Size int64 `json:"size"`
+	// SHA256 is the hex-encoded SHA256 hash of the media data
+	SHA256 string `json:"sha256"`
+	// WhatsAppURL is the original WhatsApp media URL (DEPRECATED - use Data field instead)
+	WhatsAppURL string `json:"whatsapp_url,omitempty"`
+}
+
 // TextContent contains the text message content
 type TextContent struct {
 	// Content is the actual text message
@@ -61,7 +79,9 @@ type TextContent struct {
 
 // ImageContent contains image message metadata
 type ImageContent struct {
-	// URL is the WhatsApp media URL for the image
+	// Media contains the downloaded image data and metadata (preferred)
+	Media *MediaData `json:"media,omitempty"`
+	// URL is the WhatsApp media URL for the image (DEPRECATED - use Media field instead)
 	URL string `json:"url,omitempty"`
 	// Mimetype is the image MIME type (e.g., "image/jpeg")
 	Mimetype string `json:"mimetype"`
@@ -71,7 +91,9 @@ type ImageContent struct {
 
 // VideoContent contains video message metadata
 type VideoContent struct {
-	// URL is the WhatsApp media URL for the video
+	// Media contains the downloaded video data and metadata (preferred)
+	Media *MediaData `json:"media,omitempty"`
+	// URL is the WhatsApp media URL for the video (DEPRECATED - use Media field instead)
 	URL string `json:"url,omitempty"`
 	// Mimetype is the video MIME type (e.g., "video/mp4")
 	Mimetype string `json:"mimetype"`
@@ -81,7 +103,9 @@ type VideoContent struct {
 
 // AudioContent contains audio message metadata
 type AudioContent struct {
-	// URL is the WhatsApp media URL for the audio
+	// Media contains the downloaded audio data and metadata (preferred)
+	Media *MediaData `json:"media,omitempty"`
+	// URL is the WhatsApp media URL for the audio (DEPRECATED - use Media field instead)
 	URL string `json:"url,omitempty"`
 	// Mimetype is the audio MIME type (e.g., "audio/ogg")
 	Mimetype string `json:"mimetype"`
@@ -89,7 +113,9 @@ type AudioContent struct {
 
 // DocumentContent contains document message metadata
 type DocumentContent struct {
-	// URL is the WhatsApp media URL for the document
+	// Media contains the downloaded document data and metadata (preferred)
+	Media *MediaData `json:"media,omitempty"`
+	// URL is the WhatsApp media URL for the document (DEPRECATED - use Media field instead)
 	URL string `json:"url,omitempty"`
 	// Mimetype is the document MIME type (e.g., "application/pdf")
 	Mimetype string `json:"mimetype"`
@@ -99,20 +125,118 @@ type DocumentContent struct {
 	Filename string `json:"filename"`
 }
 
+// StickerContent contains sticker message metadata
+type StickerContent struct {
+	// Media contains the downloaded sticker data and metadata (preferred)
+	Media *MediaData `json:"media,omitempty"`
+	// URL is the WhatsApp media URL for the sticker (DEPRECATED - use Media field instead)
+	URL string `json:"url,omitempty"`
+	// Mimetype is the sticker MIME type (e.g., "image/webp")
+	Mimetype string `json:"mimetype"`
+	// Caption is the optional sticker caption (rarely used)
+	Caption string `json:"caption,omitempty"`
+}
+
+// ContactContent contains contact card information
+type ContactContent struct {
+	// DisplayName is the contact's display name
+	DisplayName string `json:"display_name"`
+	// VCard is the full vCard data
+	VCard string `json:"vcard"`
+}
+
+// ContactsContent contains multiple contacts
+type ContactsContent struct {
+	// DisplayName is the name shown for the contacts array
+	DisplayName string `json:"display_name"`
+	// Contacts is an array of vCard strings
+	Contacts []string `json:"contacts"`
+}
+
+// LocationContent contains location information
+type LocationContent struct {
+	// Latitude is the location's latitude
+	Latitude float64 `json:"latitude"`
+	// Longitude is the location's longitude
+	Longitude float64 `json:"longitude"`
+	// Name is the optional location name
+	Name string `json:"name,omitempty"`
+	// Address is the optional full address
+	Address string `json:"address,omitempty"`
+	// URL is the optional map URL
+	URL string `json:"url,omitempty"`
+	// IsLive indicates if this is a live location
+	IsLive bool `json:"is_live"`
+}
+
+// ReactionContent contains reaction information
+type ReactionContent struct {
+	// Emoji is the emoji used for the reaction (empty string means removed)
+	Emoji string `json:"emoji"`
+	// TargetMessageID is the ID of the message being reacted to
+	TargetMessageID string `json:"target_message_id"`
+	// TargetSender is the sender of the target message
+	TargetSender string `json:"target_sender,omitempty"`
+}
+
+// ProtocolContent contains protocol message information (deletions, etc.)
+type ProtocolContent struct {
+	// Type is the protocol message type ("revoke", "ephemeral_setting", etc.)
+	Type string `json:"type"`
+	// TargetMessageID is the ID of the affected message (for revoke)
+	TargetMessageID string `json:"target_message_id,omitempty"`
+}
+
+// PollOption represents a single poll option
+type PollOption struct {
+	// Name is the option text
+	Name string `json:"name"`
+}
+
+// PollContent contains poll information
+type PollContent struct {
+	// Name is the poll question
+	Name string `json:"name"`
+	// Options are the available poll options
+	Options []PollOption `json:"options"`
+	// SelectableCount is the maximum number of options that can be selected
+	SelectableCount int `json:"selectable_count"`
+}
+
+// PollVoteContent contains poll vote information
+type PollVoteContent struct {
+	// PollMessageID is the ID of the original poll message
+	PollMessageID string `json:"poll_message_id"`
+	// SelectedOptions are the option names that were selected
+	SelectedOptions []string `json:"selected_options"`
+}
+
 // MessagePayload represents the message content structure
 type MessagePayload struct {
-	MessageID string `json:"message_id"`
-	ChatID    string `json:"chat_id"`
-	Sender    string `json:"sender"`
-	Timestamp int64  `json:"timestamp"`
-	FromMe    bool   `json:"from_me"`
-	Type      string `json:"type"` // "text", "image", "video", "audio", "document", "unknown"
-	Text      *TextContent     `json:"text,omitempty"`
-	Image     *ImageContent    `json:"image,omitempty"`
-	Video     *VideoContent    `json:"video,omitempty"`
-	Audio     *AudioContent    `json:"audio,omitempty"`
-	Document  *DocumentContent `json:"document,omitempty"`
-	HasMedia  bool             `json:"has_media,omitempty"`
+	MessageID  string           `json:"message_id"`
+	ChatID     string           `json:"chat_id"`
+	ChatName   string           `json:"chat_name"`   // Group name for groups, contact name for DM
+	Sender     string           `json:"sender"`
+	SenderName string           `json:"sender_name"` // Full name or PushName of sender
+	Timestamp  int64            `json:"timestamp"`
+	PushName   string           `json:"push_name"` // Original PushName from WhatsApp
+	FromMe     bool             `json:"from_me"`
+	IsGroup    bool             `json:"is_group"`
+	Type       string           `json:"type"` // "text", "image", "video", "audio", "document", "sticker", "contact", "contacts", "location", "live_location", "reaction", "poll", "poll_vote", "protocol", "unknown"
+	Text       *TextContent     `json:"text,omitempty"`
+	Image      *ImageContent    `json:"image,omitempty"`
+	Video      *VideoContent    `json:"video,omitempty"`
+	Audio      *AudioContent    `json:"audio,omitempty"`
+	Document   *DocumentContent `json:"document,omitempty"`
+	Sticker    *StickerContent  `json:"sticker,omitempty"`
+	Contact    *ContactContent  `json:"contact,omitempty"`
+	Contacts   *ContactsContent `json:"contacts,omitempty"`
+	Location   *LocationContent `json:"location,omitempty"`
+	Reaction   *ReactionContent `json:"reaction,omitempty"`
+	Protocol   *ProtocolContent `json:"protocol,omitempty"`
+	Poll       *PollContent     `json:"poll,omitempty"`
+	PollVote   *PollVoteContent `json:"poll_vote,omitempty"`
+	HasMedia   bool             `json:"has_media,omitempty"`
 }
 
 // MessageReceivedEvent is published when a message is received from WhatsApp
@@ -210,4 +334,42 @@ type MessageReactionFailedEvent struct {
 	ChatID    string `json:"chat_id"`
 	MessageID string `json:"message_id"`
 	Error     string `json:"error"`
+}
+
+// Message History Events
+
+// MessageHistoryRequestedEvent is published when history sync is requested
+type MessageHistoryRequestedEvent struct {
+	DeviceID        string `json:"device_id"`
+	ChatID          string `json:"chat_id"`
+	BeforeMessageID string `json:"before_message_id,omitempty"`
+	Count           int    `json:"count"`
+	RequestID       string `json:"request_id"` // Unique ID to correlate request/response
+}
+
+// MessageHistorySyncedEvent is published when history sync completes successfully
+type MessageHistorySyncedEvent struct {
+	DeviceID  string           `json:"device_id"`
+	ChatID    string           `json:"chat_id,omitempty"`
+	Messages  []MessagePayload `json:"messages"`
+	RequestID string           `json:"request_id"` // Correlate with request
+	Count     int              `json:"count"`      // Number of messages synced
+}
+
+// MessageHistoryFailedEvent is published when history sync fails
+type MessageHistoryFailedEvent struct {
+	DeviceID  string `json:"device_id"`
+	ChatID    string `json:"chat_id,omitempty"`
+	RequestID string `json:"request_id"`
+	Error     string `json:"error"`
+}
+
+// MessageMediaDownloadFailedEvent is published when media download from WhatsApp fails
+type MessageMediaDownloadFailedEvent struct {
+	DeviceID  string `json:"device_id"`
+	MessageID string `json:"message_id"`
+	ChatID    string `json:"chat_id,omitempty"`
+	MediaType string `json:"media_type"` // "image", "video", "audio", "document", "sticker"
+	Error     string `json:"error"`
+	Timestamp int64  `json:"timestamp"`
 }

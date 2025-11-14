@@ -69,7 +69,7 @@ func (p *Plugin) handleQRRequest(msg *renrqueue.QueueItemResponse) error {
 	if qrCode == "" {
 		errorMsg := "QR code generation timeout"
 		p.sendChannelUpdate(request.Channel.ID, "ERROR", deviceID, nil, &errorMsg)
-		return fmt.Errorf(errorMsg)
+		return fmt.Errorf("%s", errorMsg)
 	}
 
 	p.logger.Infof("QR code generated: channel_id=%d", request.Channel.ID)

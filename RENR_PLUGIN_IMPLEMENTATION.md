@@ -71,6 +71,7 @@ Outgoing message handling (Queue → WhatsApp):
 ### 5. `src/plugins/renr/incoming.go`
 Incoming message handling (WhatsApp → Queue):
 - `handleIncomingMessage()` - Processes WhatsApp messages
+- `handleHistorySynced()` - Processes historical messages from message history sync
 - `convertToQueueChatMessage()` - Converts to queue format
 - Handles text, image, document, video, audio messages
 - Downloads media and uploads to S3
@@ -144,6 +145,67 @@ Media handling:
 8. Log success/error
 ```
 
+### Historical Messages (Message History Sync)
+
+#### Automatic History Sync (First Connection)
+
+When a device first connects via QR code, WhatsApp **automatically** sends recent message history:
+
+```
+1. User scans QR code
+   ↓
+2. Device connects to WhatsApp
+   ↓
+3. WhatsApp Server automatically sends history sync (events.HistorySync)
+   ↓
+4. Manager extracts messages from history sync
+   ↓
+5. Manager publishes "message.history.synced" event with messages array
+   ↓
+6. Renr plugin receives event
+   ↓
+7. Plugin iterates through each historical message
+   ↓
+8. For each message:
+   - Convert to QueueChatMessage format (same as incoming messages)
+   - If media: download and upload to S3
+   - Enqueue to "channel-chat-message-incoming" (ref=device_id)
+   ↓
+9. Log success count (e.g., "Enqueued 45/50 history messages")
+```
+
+#### Manual History Request (API)
+
+Users can also manually request history for specific chats:
+
+```
+1. Client requests message history via POST /message/history
+   ↓
+2. Manager sends history sync request to primary WhatsApp device
+   ↓
+3. Manager publishes "message.history.requested" event
+   ↓
+4. Primary device sends back historical messages
+   ↓
+5. Manager receives events.HistorySync from WhatsApp
+   ↓
+6. Manager publishes "message.history.synced" event with messages array
+   ↓
+7. Renr plugin receives event (same flow as automatic sync)
+   ↓
+8. Plugin enqueues messages to "channel-chat-message-incoming"
+```
+
+**Key Points:**
+- **Automatic sync happens on first QR connection** - no API call needed
+- Historical messages are treated identically to incoming messages
+- Each message is individually enqueued to `channel-chat-message-incoming`
+- Media handling is the same (download from WhatsApp, upload to S3)
+- Failed message conversions are skipped with error logging
+- Uses same `convertToQueueChatMessage()` logic for consistency
+- Both automatic and manual sync use the same handler in Manager (`handleHistorySync`)
+```
+
 ## Event Subscriptions
 
 The Renr plugin subscribes to these events:
@@ -156,6 +218,7 @@ The Renr plugin subscribes to these events:
 
 ### Message Events
 - `message.received` → Convert and enqueue to incoming queue
+- `message.history.synced` → Process historical messages and enqueue to incoming queue
 
 ## Configuration
 

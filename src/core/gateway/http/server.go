@@ -5,9 +5,10 @@ import (
 
 	"whatsapp/src/core/whatsapp"
 
+	_ "whatsapp/docs" // Import generated Swagger docs
+
 	"github.com/gofiber/fiber/v2"
 	fiberSwagger "github.com/swaggo/fiber-swagger"
-	_ "whatsapp/docs" // Import generated Swagger docs
 )
 
 // @title WhatsApp Gateway API
@@ -59,6 +60,7 @@ func (s *Server) registerRoutes() {
 	s.app.Post("/message/file", s.handleSendFileMessage)
 	s.app.Post("/message/presence", s.handleSendPresence)
 	s.app.Post("/message/emoji", s.handleSendReaction)
+	s.app.Post("/message/history", s.handleFetchMessageHistory)
 }
 
 // CreateDeviceRequest represents a request to create a new device
@@ -280,6 +282,36 @@ func (s *Server) handleSendReaction(c *fiber.Ctx) error {
 
 	ctx := context.Background()
 	resp, err := s.manager.SendReaction(ctx, req)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(resp)
+}
+
+// handleFetchMessageHistory fetches message history from WhatsApp
+// @Summary Fetch message history
+// @Description Requests message history from the user's primary WhatsApp device. The response indicates the request was sent. Actual messages will arrive via events.HistorySync events and webhooks. Supports pagination using before_message_id.
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param request body whatsapp.FetchMessageHistoryRequest true "Message history request with device_id, chat_id, optional before_message_id for pagination, and count (default: 50, max: 100)"
+// @Success 200 {object} whatsapp.MessageHistoryResponse "History sync request sent successfully. Contains request_id for tracking."
+// @Failure 400 {object} map[string]string "Invalid request body or parameters"
+// @Failure 500 {object} map[string]string "Internal server error or device not connected"
+// @Router /message/history [post]
+func (s *Server) handleFetchMessageHistory(c *fiber.Ctx) error {
+	var req whatsapp.FetchMessageHistoryRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	ctx := context.Background()
+	resp, err := s.manager.FetchMessageHistory(ctx, req)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

@@ -29,19 +29,26 @@ func getStringValue(s *string) string {
 }
 
 // extractPhoneFromJID extracts phone number from WhatsApp JID
+// Handles multiple formats:
+// - Individual: "6281234567890@s.whatsapp.net"
+// - Group: "120363423115728010@g.us"
+// - LID (Linked Device): "219408454660313:46@lid"
 func extractPhoneFromJID(jid string) string {
-	// JID format: "6281234567890@s.whatsapp.net"
+	// Split by @ to get the identifier part
 	parts := strings.Split(jid, "@")
-	if len(parts) > 0 {
-		return parts[0]
+	if len(parts) == 0 {
+		return jid
 	}
-	return jid
-}
 
-// extractNameFromSender extracts name from sender JID
-// Returns phone if name not available
-func extractNameFromSender(sender string) string {
-	return extractPhoneFromJID(sender)
+	phone := parts[0]
+
+	// Remove LID suffix (everything after colon) if present
+	// Example: "219408454660313:46" -> "219408454660313"
+	if strings.Contains(phone, ":") {
+		phone = strings.Split(phone, ":")[0]
+	}
+
+	return phone
 }
 
 // getExtension returns file extension from mime type
@@ -75,6 +82,43 @@ func getExtension(mimeType string) string {
 	default:
 		return "bin"
 	}
+}
+
+// getStickerFilename determines the appropriate filename for stickers
+// based on MIME type and original filename
+// - If MIME type indicates a standard image format (webp, png, jpeg, gif): keep original extension
+// - If MIME type is binary/octet-stream or file extension is .bin: use .sticker extension
+// This handles animated stickers which are often zip archives disguised as .bin files
+func getStickerFilename(originalFilename, mimetype string) string {
+	// Check MIME type first
+	switch mimetype {
+	case "image/webp", "image/png", "image/jpeg", "image/gif":
+		// Standard image formats - use original filename
+		return originalFilename
+	case "application/octet-stream", "application/zip", "application/x-zip-compressed":
+		// Binary or zip - use .sticker extension
+		return replaceExtension(originalFilename, "sticker")
+	default:
+		// Check if original file has .bin extension
+		if strings.HasSuffix(strings.ToLower(originalFilename), ".bin") {
+			return replaceExtension(originalFilename, "sticker")
+		}
+		// Keep original filename for other cases
+		return originalFilename
+	}
+}
+
+// replaceExtension replaces file extension with new extension
+// Example: replaceExtension("file.bin", "sticker") -> "file.sticker"
+func replaceExtension(filename, newExt string) string {
+	// Find last dot
+	lastDot := strings.LastIndex(filename, ".")
+	if lastDot == -1 {
+		// No extension, just append
+		return filename + "." + newExt
+	}
+	// Replace extension
+	return filename[:lastDot+1] + newExt
 }
 
 // queueLoggerAdapter adapts waLog.Logger to renrqueue.Logger

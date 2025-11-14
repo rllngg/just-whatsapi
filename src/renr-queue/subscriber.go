@@ -70,11 +70,12 @@ func WithLogger(logger Logger) SubscriberOption {
 // opts: Optional configuration (WithRef, WithLogger)
 //
 // Example:
-//   subscriber, err := client.Subscribe("my-topic", "1s", func(msg *QueueItemResponse) error {
-//       fmt.Printf("Processing message: %d\n", msg.ID)
-//       // Process the message...
-//       return nil // Return nil to mark as completed, or error to mark as failed
-//   }, WithRef("my-ref"))
+//
+//	subscriber, err := client.Subscribe("my-topic", "1s", func(msg *QueueItemResponse) error {
+//	    fmt.Printf("Processing message: %d\n", msg.ID)
+//	    // Process the message...
+//	    return nil // Return nil to mark as completed, or error to mark as failed
+//	}, WithRef("my-ref"))
 func (c *Client) Subscribe(topic, interval string, handler MessageHandler, opts ...SubscriberOption) (*Subscriber, error) {
 	duration, err := time.ParseDuration(interval)
 	if err != nil {

@@ -114,17 +114,12 @@ func (p *Plugin) handleOutgoingMessage(deviceID string, msg *renrqueue.QueueItem
 	if err := json.Unmarshal([]byte(*msg.Payload), &chatMsg); err != nil {
 		return fmt.Errorf("invalid JSON payload: %w", err)
 	}
-
-	// Validate
-	if chatMsg.To.Phone == "" {
-		return fmt.Errorf("to.phone is required")
-	}
 	if chatMsg.Body.Type == "" {
 		return fmt.Errorf("body.type is required")
 	}
 
 	p.logger.Infof("Processing outgoing message: device=%s, type=%s, to=%s",
-		deviceID, chatMsg.Body.Type, chatMsg.To.Phone)
+		deviceID, chatMsg.Body.Type, chatMsg.To.ID)
 
 	// Route based on type
 	switch chatMsg.Body.Type {
@@ -138,6 +133,10 @@ func (p *Plugin) handleOutgoingMessage(deviceID string, msg *renrqueue.QueueItem
 		return p.sendVideoMessage(deviceID, chatMsg)
 	case "audio":
 		return p.sendAudioMessage(deviceID, chatMsg)
+	case "file":
+		return p.sendFileMessage(deviceID, chatMsg)
+	case "reaction":
+		return p.sendReactionMessage(deviceID, chatMsg)
 	default:
 		return fmt.Errorf("unsupported message type: %s", chatMsg.Body.Type)
 	}
@@ -145,7 +144,7 @@ func (p *Plugin) handleOutgoingMessage(deviceID string, msg *renrqueue.QueueItem
 
 // sendTextMessage sends a text message via manager
 func (p *Plugin) sendTextMessage(deviceID string, msg QueueChatMessage) error {
-	chatID := formatPhoneToJID(msg.To.Phone)
+	chatID := msg.To.ID
 
 	req := whatsapp.SendTextMessageRequest{
 		DeviceID:       deviceID,
@@ -170,7 +169,7 @@ func (p *Plugin) sendImageMessage(deviceID string, msg QueueChatMessage) error {
 		return fmt.Errorf("filesURL is required for image messages")
 	}
 
-	chatID := formatPhoneToJID(msg.To.Phone)
+	chatID := msg.To.ID
 
 	req := whatsapp.SendImageMessageRequest{
 		DeviceID:       deviceID,
@@ -196,7 +195,7 @@ func (p *Plugin) sendDocumentMessage(deviceID string, msg QueueChatMessage) erro
 		return fmt.Errorf("filesURL is required for document messages")
 	}
 
-	chatID := formatPhoneToJID(msg.To.Phone)
+	chatID := msg.To.ID
 
 	req := whatsapp.SendFileMessageRequest{
 		DeviceID:       deviceID,
@@ -222,7 +221,7 @@ func (p *Plugin) sendVideoMessage(deviceID string, msg QueueChatMessage) error {
 		return fmt.Errorf("filesURL is required for video messages")
 	}
 
-	chatID := formatPhoneToJID(msg.To.Phone)
+	chatID := msg.To.ID
 
 	// Video uses the image endpoint in the manager
 	req := whatsapp.SendImageMessageRequest{
@@ -249,7 +248,7 @@ func (p *Plugin) sendAudioMessage(deviceID string, msg QueueChatMessage) error {
 		return fmt.Errorf("filesURL is required for audio messages")
 	}
 
-	chatID := formatPhoneToJID(msg.To.Phone)
+	chatID := msg.To.ID
 
 	// Audio uses the file endpoint in the manager
 	req := whatsapp.SendFileMessageRequest{
@@ -267,5 +266,58 @@ func (p *Plugin) sendAudioMessage(deviceID string, msg QueueChatMessage) error {
 	}
 
 	p.logger.Infof("Sent audio message: device=%s, to=%s", deviceID, chatID)
+	return nil
+}
+
+// sendFileMessage sends a file message via manager
+func (p *Plugin) sendFileMessage(deviceID string, msg QueueChatMessage) error {
+	if len(msg.Body.FilesURL) == 0 {
+		return fmt.Errorf("filesURL is required for file messages")
+	}
+
+	chatID := msg.To.ID
+
+	req := whatsapp.SendFileMessageRequest{
+		DeviceID:       deviceID,
+		ChatID:         chatID,
+		FileURL:        msg.Body.FilesURL[0],
+		Caption:        msg.Body.Content,
+		ReplyMessageID: getStringValue(msg.ReplyTo),
+	}
+
+	_, err := p.manager.SendFileMessage(context.Background(), req)
+	if err != nil {
+		p.logger.Errorf("Failed to send file: device=%s, to=%s, error=%v", deviceID, chatID, err)
+		return err
+	}
+
+	p.logger.Infof("Sent file message: device=%s, to=%s", deviceID, chatID)
+	return nil
+}
+
+// sendReactionMessage sends a reaction via manager
+func (p *Plugin) sendReactionMessage(deviceID string, msg QueueChatMessage) error {
+	if msg.Body.Reaction == nil {
+		return fmt.Errorf("reaction data is required for reaction messages")
+	}
+
+	chatID := msg.To.ID
+
+	req := whatsapp.SendReactionRequest{
+		DeviceID:  deviceID,
+		ChatID:    chatID,
+		MessageID: msg.Body.Reaction.TargetMessageID,
+		Emoji:     msg.Body.Reaction.Emoji,
+	}
+
+	_, err := p.manager.SendReaction(context.Background(), req)
+	if err != nil {
+		p.logger.Errorf("Failed to send reaction: device=%s, to=%s, target=%s, error=%v",
+			deviceID, chatID, req.MessageID, err)
+		return err
+	}
+
+	p.logger.Infof("Sent reaction: device=%s, to=%s, target=%s, emoji=%s",
+		deviceID, chatID, req.MessageID, req.Emoji)
 	return nil
 }

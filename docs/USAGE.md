@@ -141,10 +141,81 @@ func main() {
 
     var device DeviceResponse
     json.NewDecoder(resp.Body).Decode(&device)
-    
+
     fmt.Printf("QR Code: %s\n", device.QRCode)
 }
 ```
+
+## Fetching Message History
+
+### Request Message History
+
+Fetch older messages from a chat. The request is asynchronous - messages arrive via webhooks.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8081/message/history \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_id": "device_1",
+    "chat_id": "6289685028129@s.whatsapp.net",
+    "count": 50
+  }'
+```
+
+**Response:**
+```json
+{
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "messages": [],
+  "count": 0
+}
+```
+
+### Pagination (Fetch Older Messages)
+
+To fetch older messages, use the `before_message_id` parameter with the oldest message ID from the previous response:
+
+```bash
+curl -X POST http://localhost:8081/message/history \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_id": "device_1",
+    "chat_id": "6289685028129@s.whatsapp.net",
+    "before_message_id": "3EB089B9D6ADD58153C561",
+    "count": 50
+  }'
+```
+
+### Important Notes About Message History
+
+1. **Asynchronous Response**: The endpoint returns immediately with a `request_id`. Actual messages arrive later via:
+   - `events.HistorySync` events (on the event bus)
+   - Webhook delivery (topic: `message.history.synced`)
+
+2. **Requirements**:
+   - Your primary WhatsApp device (phone) must be online
+   - The device must be in "connected" status
+   - The primary device must have the requested message history
+
+3. **Response Time**: Usually 2-10 seconds, depending on:
+   - Network connectivity
+   - Primary device availability
+   - Number of messages requested
+
+4. **Pagination Strategy**:
+   ```bash
+   # Step 1: Get most recent messages (omit before_message_id)
+   curl -X POST .../message/history -d '{"device_id":"...", "chat_id":"...", "count":50}'
+
+   # Step 2: From webhook/event, get oldest message_id from results
+   # Step 3: Fetch next batch using that message_id
+   curl -X POST .../message/history -d '{"device_id":"...", "chat_id":"...", "before_message_id":"OLDEST_MSG_ID", "count":50}'
+
+   # Step 4: Repeat step 3 until no more messages
+   ```
+
+5. **Recommended Batch Size**: 50 messages (max: 100)
 
 ## Database
 
