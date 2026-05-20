@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"whatsapp/src/core/whatsapp"
 	renrqueue "whatsapp/src/renr-queue"
 
 	"github.com/ThreeDotsLabs/watermill/message"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // handleIncomingMessage processes incoming WhatsApp messages and enqueues them
@@ -25,7 +27,7 @@ func (p *Plugin) handleIncomingMessage(msg *message.Message) error {
 	// Convert to QueueChatMessage
 	queueMsg, err := p.convertToQueueChatMessage(event)
 	if err != nil {
-		p.logger.Errorf("Failed to convert message: device=%s, error=%v", event.DeviceID, err)
+		p.logger.Debugf("Skipping message conversion: device=%s, error=%v", event.DeviceID, err)
 		return nil // Don't retry, just log
 	}
 
@@ -84,10 +86,23 @@ func (p *Plugin) convertToQueueChatMessage(event whatsapp.MessageReceivedEvent) 
 
 	// Extract from (sender) - name already resolved by Manager
 	from := QueueChatPerson{
-		ID:    formatPhoneToJID(extractPhoneFromJID(event.Message.Sender)),
+		ID:    event.Message.Sender,     // Preserve original JID format (@lid, @s.whatsapp.net, @g.us, @c.us)
 		Name:  event.Message.SenderName, // Pre-resolved: FullName > PushName
-		Phone: extractPhoneFromJID(event.Message.Sender),
+		Phone: "",
 		Email: "",
+	}
+	/*
+		if the user sender is lid and we have phone mapping then we use it else we use the lid
+	*/
+	if !event.Sender.IsEmpty() {
+		from.ID = fmt.Sprintf("%s@%s", event.Sender.User, event.Sender.Server)
+		from.Phone = event.Sender.User
+	}
+	/*
+		when sender is phone@s.whatsapp.net extract the phone number from the sender
+	*/
+	if strings.Contains(from.ID, "@s.whatsapp.net") {
+		from.Phone = strings.Replace(from.ID, "@s.whatsapp.net", "", 1)
 	}
 
 	// Extract to (recipient - the chat/group) - name already resolved by Manager
@@ -105,9 +120,33 @@ func (p *Plugin) convertToQueueChatMessage(event whatsapp.MessageReceivedEvent) 
 		to = QueueChatPerson{
 			ID:    event.Message.ChatID,
 			Name:  event.Message.ChatName, // Pre-resolved: FullName > PushName > SenderName
-			Phone: extractPhoneFromJID(event.Message.ChatID),
+			Phone: "",
 			Email: "",
 		}
+	}
+	/*
+		if the user conversation is lid and we have phone mapping then we use it else we use the lid
+	*/
+	if !event.Conversation.IsEmpty() {
+		to.ID = fmt.Sprintf("%s@%s", event.Conversation.User, event.Conversation.Server)
+		to.Phone = event.Conversation.User
+	}
+	/*
+		if to.ID contains @s.whatsapp.net
+	*/
+	if strings.Contains(to.ID, "@s.whatsapp.net") {
+		to.Phone = strings.Replace(to.ID, "@s.whatsapp.net", "", 1)
+	}
+
+	// Fetch sender avatar URL (non-blocking, returns empty on error)
+	// Parse sender JID for avatar lookup
+	if senderJID, err := types.ParseJID(from.ID); err == nil {
+		from.AvatarURL = p.getAvatarURL(event.DeviceID, senderJID)
+	}
+
+	// Fetch recipient/group avatar URL (non-blocking, returns empty on error)
+	if toJID, err := types.ParseJID(to.ID); err == nil {
+		to.AvatarURL = p.getAvatarURL(event.DeviceID, toJID)
 	}
 
 	// Build body based on message type
@@ -384,6 +423,9 @@ func (p *Plugin) convertToQueueChatMessage(event whatsapp.MessageReceivedEvent) 
 				},
 			}
 		}
+
+	case "sender_key_distribution":
+		return nil, fmt.Errorf("skipping sender_key_distribution message (group e2e handshake, no user content)")
 
 	default:
 		body = QueueChatBody{
