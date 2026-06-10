@@ -240,6 +240,29 @@ func (d *Database) CleanupOldFailed() error {
 	return nil
 }
 
+// MarkAllPendingAsFailed marks all pending messages for a device as failed
+// This is used when a device logs out to cleanup its queue
+func (d *Database) MarkAllPendingAsFailed(deviceID string, reason string) error {
+	result, err := d.db.Exec(`
+		UPDATE renr_queue
+		SET status = 'failed',
+		    last_error = ?
+		WHERE device_id = ?
+		  AND status IN ('pending', 'processing')
+	`, reason, deviceID)
+
+	if err != nil {
+		return fmt.Errorf("failed to mark pending messages as failed: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		fmt.Printf("[RENR-QUEUE] Marked %d pending messages as failed for device %s (reason: %s)\n", rowsAffected, deviceID, reason)
+	}
+
+	return nil
+}
+
 // GetStats returns statistics about the queue
 func (d *Database) GetStats() (map[string]int64, error) {
 	stats := make(map[string]int64)

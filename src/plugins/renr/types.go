@@ -2,10 +2,11 @@ package renr
 
 // QueueChatPerson represents a person in chat
 type QueueChatPerson struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Phone string `json:"phone"`
-	Email string `json:"email"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Phone     string `json:"phone"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatarURL,omitempty"` // S3 URL of profile picture
 }
 
 // QueueChatMessage represents a chat message in queue
@@ -22,9 +23,9 @@ type QueueChatMessage struct {
 
 // QueueChatBody represents message content
 type QueueChatBody struct {
-	Type     string      `json:"type"`              // "text", "image", "document", "video", "audio", "sticker", "contact", "contacts", "location", "live_location", "reaction", "protocol", "poll", "poll_vote"
-	Content  string      `json:"content"`           // Message text or caption
-	Files    []QueueFile `json:"files,omitempty"`   // DEPRECATED - ignore
+	Type     string      `json:"type"`               // "text", "image", "document", "video", "audio", "sticker", "contact", "contacts", "location", "live_location", "reaction", "protocol", "poll", "poll_vote"
+	Content  string      `json:"content"`            // Message text or caption
+	Files    []QueueFile `json:"files,omitempty"`    // DEPRECATED - ignore
 	FilesURL []string    `json:"filesURL,omitempty"` // Use this for file URLs
 
 	// Structured data fields for new message types (all optional)
@@ -55,26 +56,26 @@ type LocationData struct {
 	Longitude float64 `json:"longitude"`
 	Name      string  `json:"name,omitempty"`
 	Address   string  `json:"address,omitempty"`
-	URL       string  `json:"url,omitempty"`      // Map URL
-	IsLive    bool    `json:"is_live"`           // true for live location
+	URL       string  `json:"url,omitempty"` // Map URL
+	IsLive    bool    `json:"is_live"`       // true for live location
 }
 
 // ReactionData represents a reaction to a message
 type ReactionData struct {
-	Emoji           string `json:"emoji"`              // Empty string = reaction removed
+	Emoji           string `json:"emoji"` // Empty string = reaction removed
 	TargetMessageID string `json:"target_message_id"`
 	TargetSender    string `json:"target_sender,omitempty"`
 }
 
 // ProtocolData represents protocol messages (deletions, etc.)
 type ProtocolData struct {
-	ProtocolType    string `json:"protocol_type"`    // "revoke", "ephemeral_setting", etc.
+	ProtocolType    string `json:"protocol_type"`               // "revoke", "ephemeral_setting", etc.
 	TargetMessageID string `json:"target_message_id,omitempty"` // For revoke
 }
 
 // PollData represents a poll creation
 type PollData struct {
-	Name            string       `json:"name"`             // Poll question
+	Name            string       `json:"name"` // Poll question
 	Options         []PollOption `json:"options"`
 	SelectableCount int          `json:"selectable_count"` // Max selections allowed
 }
@@ -113,10 +114,19 @@ type ChannelInfo struct {
 // QueueChannelUpdate represents outgoing channel update
 type QueueChannelUpdate struct {
 	ChannelID   int64   `json:"channel_id"`
-	Status      string  `json:"status"`      // WAITING_INTEGRATION, CONNECTED, ERROR
+	Name        string  `json:"name"`
+	Status      string  `json:"status"` // WAITING_INTEGRATION, CONNECTED, ERROR, DISCONNECTED
 	Reference   string  `json:"reference"`
-	Data        *string `json:"data,omitempty"`       // Base64 QR code
+	Data        *string `json:"data,omitempty"` // Base64 QR code
 	ErrorReason *string `json:"errorReason,omitempty"`
+}
+
+// ChannelDisconnectRequest represents incoming disconnect request from queue
+type ChannelDisconnectRequest struct {
+	ChannelID   int64  `json:"channel_id"`
+	Status      string `json:"status"`      // Should be "DISCONNECTED"
+	Reference   string `json:"reference"`   // device_id to disconnect
+	ErrorReason string `json:"errorReason"` // Reason for disconnect (required, can be empty string)
 }
 
 // QueueMessageRead represents a message read receipt in queue
@@ -130,7 +140,7 @@ type QueueMessageRead struct {
 
 // QueueMessageReadIds represents message read receipt with IDs for queue
 type QueueMessageReadIds struct {
-	ConversationID int64    `json:"conversation_id"`
-	MessageIDs     []int64  `json:"message_ids"`
-	ReadAt         string   `json:"read_at"` // ISO 8601 format for LocalDateTime
+	ConversationID int64   `json:"conversation_id"`
+	MessageIDs     []int64 `json:"message_ids"`
+	ReadAt         string  `json:"read_at"` // ISO 8601 format for LocalDateTime
 }

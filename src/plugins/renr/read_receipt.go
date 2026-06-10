@@ -55,7 +55,7 @@ func (p *Plugin) handleMessageRead(msg *message.Message) error {
 func (p *Plugin) convertToQueueMessageRead(event whatsapp.MessageReadEvent, channelID int64) *QueueMessageRead {
 	// Extract reader (who read the message - the Sender field in read receipts)
 	from := QueueChatPerson{
-		ID:    extractPhoneFromJID(event.Sender),
+		ID:    event.Sender, // Preserve original JID format (@lid, @s.whatsapp.net, @g.us, @c.us)
 		Name:  "Loading...", // Placeholder - matches reference implementation
 		Phone: extractPhoneFromJID(event.Sender),
 		Email: "",

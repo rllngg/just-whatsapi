@@ -54,6 +54,18 @@ func (p *Plugin) handleDeviceLogout(msg *message.Message) error {
 
 	p.logger.Infof("Device logged out, stopping message subscriber: %s", event.DeviceID)
 	p.stopMessageSubscriber(event.DeviceID)
+
+	// Cleanup pending messages in persistence queue
+	if p.db != nil {
+		reason := fmt.Sprintf("Device logged out: %s", event.Reason)
+		if err := p.db.MarkAllPendingAsFailed(event.DeviceID, reason); err != nil {
+			p.logger.Warnf("Failed to cleanup pending messages for %s: %v", event.DeviceID, err)
+			// Don't fail the handler - logout already succeeded
+		} else {
+			p.logger.Infof("Cleaned up pending messages for device: %s", event.DeviceID)
+		}
+	}
+
 	return nil
 }
 
@@ -215,7 +227,6 @@ func (p *Plugin) sendDocumentMessage(deviceID string, msg QueueChatMessage) erro
 	return nil
 }
 
-// sendVideoMessage sends a video message via manager
 func (p *Plugin) sendVideoMessage(deviceID string, msg QueueChatMessage) error {
 	if len(msg.Body.FilesURL) == 0 {
 		return fmt.Errorf("filesURL is required for video messages")
@@ -223,8 +234,7 @@ func (p *Plugin) sendVideoMessage(deviceID string, msg QueueChatMessage) error {
 
 	chatID := msg.To.ID
 
-	// Video uses the image endpoint in the manager
-	req := whatsapp.SendImageMessageRequest{
+	req := whatsapp.SendVideoMessageRequest{
 		DeviceID:       deviceID,
 		ChatID:         chatID,
 		FileURL:        msg.Body.FilesURL[0],
@@ -232,7 +242,7 @@ func (p *Plugin) sendVideoMessage(deviceID string, msg QueueChatMessage) error {
 		ReplyMessageID: getStringValue(msg.ReplyTo),
 	}
 
-	_, err := p.manager.SendImageMessage(context.Background(), req)
+	_, err := p.manager.SendVideoMessage(context.Background(), req)
 	if err != nil {
 		p.logger.Errorf("Failed to send video: device=%s, to=%s, error=%v", deviceID, chatID, err)
 		return err

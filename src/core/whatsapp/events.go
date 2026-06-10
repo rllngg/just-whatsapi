@@ -1,5 +1,7 @@
 package whatsapp
 
+import "go.mau.fi/whatsmeow/types"
+
 // BaseEvent contains common fields for all events
 type BaseEvent struct {
 	DeviceID string `json:"device_id"`
@@ -21,9 +23,11 @@ type DeviceQRReadyEvent struct {
 
 // DeviceConnectedEvent is published when device successfully connects
 type DeviceConnectedEvent struct {
-	DeviceID  string `json:"device_id"`
-	DeviceJID string `json:"device_jid,omitempty"`
-	Status    string `json:"status"` // "connected"
+	DeviceID    string `json:"device_id"`
+	PhoneNumber string `json:"phone_number"`
+	DeviceLID   string `json:"device_lid"`
+	DeviceJID   string `json:"device_jid,omitempty"`
+	Status      string `json:"status"` // "connected"
 }
 
 // DeviceDisconnectedEvent is published when device loses connection
@@ -215,7 +219,7 @@ type PollVoteContent struct {
 type MessagePayload struct {
 	MessageID  string           `json:"message_id"`
 	ChatID     string           `json:"chat_id"`
-	ChatName   string           `json:"chat_name"`   // Group name for groups, contact name for DM
+	ChatName   string           `json:"chat_name"` // Group name for groups, contact name for DM
 	Sender     string           `json:"sender"`
 	SenderName string           `json:"sender_name"` // Full name or PushName of sender
 	Timestamp  int64            `json:"timestamp"`
@@ -241,9 +245,11 @@ type MessagePayload struct {
 
 // MessageReceivedEvent is published when a message is received from WhatsApp
 type MessageReceivedEvent struct {
-	DeviceID string         `json:"device_id"`
-	Message  MessagePayload `json:"message"`
-	Source   string         `json:"source"` // "whatsapp"
+	DeviceID     string         `json:"device_id"`
+	Message      MessagePayload `json:"message"`
+	Sender       types.JID      `json:"sender"`
+	Conversation types.JID      `json:"conversation"`
+	Source       string         `json:"source"` // "whatsapp"
 }
 
 // MessageReadEvent is published when a read receipt is received
@@ -283,6 +289,21 @@ type MessageImageSentEvent struct {
 
 // MessageImageFailedEvent is published when sending an image message fails
 type MessageImageFailedEvent struct {
+	DeviceID string `json:"device_id"`
+	ChatID   string `json:"chat_id"`
+	Error    string `json:"error"`
+}
+
+// MessageVideoSentEvent is published when a video message is successfully sent
+type MessageVideoSentEvent struct {
+	DeviceID  string `json:"device_id"`
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	Source    string `json:"source"` // "http"
+}
+
+// MessageVideoFailedEvent is published when sending a video message fails
+type MessageVideoFailedEvent struct {
 	DeviceID string `json:"device_id"`
 	ChatID   string `json:"chat_id"`
 	Error    string `json:"error"`

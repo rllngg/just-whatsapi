@@ -57,6 +57,7 @@ func (s *Server) registerRoutes() {
 	// Message endpoints
 	s.app.Post("/message/text", s.handleSendTextMessage)
 	s.app.Post("/message/image", s.handleSendImageMessage)
+	s.app.Post("/message/video", s.handleSendVideoMessage)
 	s.app.Post("/message/file", s.handleSendFileMessage)
 	s.app.Post("/message/presence", s.handleSendPresence)
 	s.app.Post("/message/emoji", s.handleSendReaction)
@@ -190,6 +191,36 @@ func (s *Server) handleSendImageMessage(c *fiber.Ctx) error {
 
 	ctx := context.Background()
 	resp, err := s.manager.SendImageMessage(ctx, req)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(resp)
+}
+
+// handleSendVideoMessage handles video message sending
+// @Summary Send video message
+// @Description Sends a video message to a WhatsApp chat
+// @Tags Message
+// @Accept json
+// @Produce json
+// @Param request body whatsapp.SendVideoMessageRequest true "Video message request"
+// @Success 200 {object} whatsapp.MessageResponse "Video sent successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /message/video [post]
+func (s *Server) handleSendVideoMessage(c *fiber.Ctx) error {
+	var req whatsapp.SendVideoMessageRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	ctx := context.Background()
+	resp, err := s.manager.SendVideoMessage(ctx, req)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

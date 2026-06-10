@@ -81,7 +81,7 @@ func ExampleWhatsAppQRHandler(client *Client, manager WhatsAppManager) (*Subscri
 		if qrCode == "" {
 			errorMsg := "QR code generation timeout"
 			sendChannelUpdate(client, payload.Channel.ID, "ERROR", deviceID, nil, &errorMsg)
-			return fmt.Errorf(errorMsg)
+			return fmt.Errorf("%s", errorMsg)
 		}
 
 		// Send success update to channel-update queue

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +23,14 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+)
+
+// Error definitions
+var (
+	ErrDeviceNotFound     = errors.New("device not found")
+	ErrDeviceNotConnected = errors.New("device not connected")
 )
 
 // EventPublisher defines the interface for publishing events
@@ -79,6 +87,24 @@ func (m *Manager) SetEventPublisher(publisher EventPublisher) {
 func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, client *whatsmeow.Client) MessagePayload {
 	ctx := context.Background()
 
+	// Validate input - prevent nil pointer panics
+	if v == nil {
+		m.logger.Warnf("Received nil message event for device %s, skipping", deviceID)
+		return MessagePayload{
+			Type:      "unknown",
+			Timestamp: time.Now().UnixMilli(),
+		}
+	}
+
+	if v.Message == nil {
+		m.logger.Debugf("Skipping message with nil content: device=%s, msg_id=%s", deviceID, v.Info.ID)
+		return MessagePayload{
+			MessageID: v.Info.ID,
+			Type:      "unknown",
+			Timestamp: v.Info.Timestamp.UnixMilli(),
+		}
+	}
+
 	// Initialize payload with basic info
 	chatName := ""
 	senderName := v.Info.PushName
@@ -116,9 +142,9 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 
 	payload := MessagePayload{
 		MessageID:  v.Info.ID,
-		ChatID:     v.Info.Chat.String(),
+		ChatID:     fmt.Sprintf("%s@%s", v.Info.Chat.User, v.Info.Chat.Server),
 		ChatName:   chatName,
-		Sender:     v.Info.Sender.String(),
+		Sender:     fmt.Sprintf("%s@%s", v.Info.Sender.User, v.Info.Sender.Server),
 		SenderName: senderName,
 		Timestamp:  v.Info.Timestamp.UnixMilli(),
 		PushName:   v.Info.PushName,
@@ -128,6 +154,86 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 
 	// Extract message content based on type
 	msg := v.Message
+
+	// Unwrap container messages so the classifier sees the actual content.
+	// WhatsApp wraps real messages in containers for several flows:
+	//   - DeviceSentMessage: messages sent from a linked/companion device
+	//   - EphemeralMessage: disappearing-message chats
+	//   - ViewOnceMessage / V2 / V2Extension / LimitSharingMessage: single-view media
+	//   - DocumentWithCaptionMessage: document + caption pair
+	//   - EditedMessage: message edits
+	//   - GroupMentionedMessage / StatusMentionMessage / GroupStatusMentionMessage: mentions
+	//   - GroupStatusMessage / GroupStatusMessageV2 / StatusAddYours / EventCoverImage: status broadcasts
+	//   - AssociatedChildMessage: album child item
+	//   - PollCreationMessageV4 / PollCreationOptionImageMessage: poll v4 wrappers
+	//   - QuestionMessage / QuestionReplyMessage: Q&A feature
+	//   - BotInvokeMessage / BotTaskMessage / BotForwardedMessage / LottieStickerMessage: bot/animated content
+	//   - NewsletterAdminProfileMessage / V2: newsletter profile updates
+	// Cap loop at 8 to bound combined nesting (e.g. DeviceSent -> Ephemeral -> ViewOnce -> Document).
+	for i := 0; i < 8 && msg != nil; i++ {
+		switch {
+		case msg.GetDeviceSentMessage() != nil && msg.GetDeviceSentMessage().GetMessage() != nil:
+			msg = msg.GetDeviceSentMessage().GetMessage()
+		case msg.GetEphemeralMessage() != nil && msg.GetEphemeralMessage().GetMessage() != nil:
+			msg = msg.GetEphemeralMessage().GetMessage()
+		case msg.GetViewOnceMessage() != nil && msg.GetViewOnceMessage().GetMessage() != nil:
+			msg = msg.GetViewOnceMessage().GetMessage()
+		case msg.GetViewOnceMessageV2() != nil && msg.GetViewOnceMessageV2().GetMessage() != nil:
+			msg = msg.GetViewOnceMessageV2().GetMessage()
+		case msg.GetViewOnceMessageV2Extension() != nil && msg.GetViewOnceMessageV2Extension().GetMessage() != nil:
+			msg = msg.GetViewOnceMessageV2Extension().GetMessage()
+		case msg.GetLimitSharingMessage() != nil && msg.GetLimitSharingMessage().GetMessage() != nil:
+			msg = msg.GetLimitSharingMessage().GetMessage()
+		case msg.GetDocumentWithCaptionMessage() != nil && msg.GetDocumentWithCaptionMessage().GetMessage() != nil:
+			msg = msg.GetDocumentWithCaptionMessage().GetMessage()
+		case msg.GetEditedMessage() != nil && msg.GetEditedMessage().GetMessage() != nil:
+			msg = msg.GetEditedMessage().GetMessage()
+		case msg.GetGroupMentionedMessage() != nil && msg.GetGroupMentionedMessage().GetMessage() != nil:
+			msg = msg.GetGroupMentionedMessage().GetMessage()
+		case msg.GetStatusMentionMessage() != nil && msg.GetStatusMentionMessage().GetMessage() != nil:
+			msg = msg.GetStatusMentionMessage().GetMessage()
+		case msg.GetGroupStatusMentionMessage() != nil && msg.GetGroupStatusMentionMessage().GetMessage() != nil:
+			msg = msg.GetGroupStatusMentionMessage().GetMessage()
+		case msg.GetGroupStatusMessage() != nil && msg.GetGroupStatusMessage().GetMessage() != nil:
+			msg = msg.GetGroupStatusMessage().GetMessage()
+		case msg.GetGroupStatusMessageV2() != nil && msg.GetGroupStatusMessageV2().GetMessage() != nil:
+			msg = msg.GetGroupStatusMessageV2().GetMessage()
+		case msg.GetStatusAddYours() != nil && msg.GetStatusAddYours().GetMessage() != nil:
+			msg = msg.GetStatusAddYours().GetMessage()
+		case msg.GetEventCoverImage() != nil && msg.GetEventCoverImage().GetMessage() != nil:
+			msg = msg.GetEventCoverImage().GetMessage()
+		case msg.GetAssociatedChildMessage() != nil && msg.GetAssociatedChildMessage().GetMessage() != nil:
+			msg = msg.GetAssociatedChildMessage().GetMessage()
+		case msg.GetPollCreationMessageV4() != nil && msg.GetPollCreationMessageV4().GetMessage() != nil:
+			msg = msg.GetPollCreationMessageV4().GetMessage()
+		case msg.GetPollCreationOptionImageMessage() != nil && msg.GetPollCreationOptionImageMessage().GetMessage() != nil:
+			msg = msg.GetPollCreationOptionImageMessage().GetMessage()
+		case msg.GetQuestionMessage() != nil && msg.GetQuestionMessage().GetMessage() != nil:
+			msg = msg.GetQuestionMessage().GetMessage()
+		case msg.GetQuestionReplyMessage() != nil && msg.GetQuestionReplyMessage().GetMessage() != nil:
+			msg = msg.GetQuestionReplyMessage().GetMessage()
+		case msg.GetBotInvokeMessage() != nil && msg.GetBotInvokeMessage().GetMessage() != nil:
+			msg = msg.GetBotInvokeMessage().GetMessage()
+		case msg.GetBotTaskMessage() != nil && msg.GetBotTaskMessage().GetMessage() != nil:
+			msg = msg.GetBotTaskMessage().GetMessage()
+		case msg.GetBotForwardedMessage() != nil && msg.GetBotForwardedMessage().GetMessage() != nil:
+			msg = msg.GetBotForwardedMessage().GetMessage()
+		case msg.GetLottieStickerMessage() != nil && msg.GetLottieStickerMessage().GetMessage() != nil:
+			msg = msg.GetLottieStickerMessage().GetMessage()
+		case msg.GetNewsletterAdminProfileMessage() != nil && msg.GetNewsletterAdminProfileMessage().GetMessage() != nil:
+			msg = msg.GetNewsletterAdminProfileMessage().GetMessage()
+		case msg.GetNewsletterAdminProfileMessageV2() != nil && msg.GetNewsletterAdminProfileMessageV2().GetMessage() != nil:
+			msg = msg.GetNewsletterAdminProfileMessageV2().GetMessage()
+		default:
+			goto classify
+		}
+	}
+classify:
+	if msg == nil {
+		payload.Type = "unknown"
+		return payload
+	}
+
 	if msg.Conversation != nil {
 		payload.Type = "text"
 		payload.Text = &TextContent{
@@ -424,12 +530,12 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 		payload.Type = "reaction"
 		reactionInfo := &ReactionContent{
 			Emoji:           msg.ReactionMessage.GetText(),
-			TargetMessageID: msg.ReactionMessage.GetKey().GetId(),
+			TargetMessageID: msg.ReactionMessage.GetKey().GetID(),
 		}
 		if msg.ReactionMessage.GetKey().GetParticipant() != "" {
 			reactionInfo.TargetSender = msg.ReactionMessage.GetKey().GetParticipant()
-		} else if msg.ReactionMessage.GetKey().GetRemoteJid() != "" {
-			reactionInfo.TargetSender = msg.ReactionMessage.GetKey().GetRemoteJid()
+		} else if msg.ReactionMessage.GetKey().GetRemoteJID() != "" {
+			reactionInfo.TargetSender = msg.ReactionMessage.GetKey().GetRemoteJID()
 		}
 		payload.Reaction = reactionInfo
 	} else if msg.ProtocolMessage != nil {
@@ -441,7 +547,7 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 		case waProto.ProtocolMessage_REVOKE:
 			protocolType = "revoke"
 			if msg.ProtocolMessage.Key != nil {
-				targetMessageID = msg.ProtocolMessage.Key.GetId()
+				targetMessageID = msg.ProtocolMessage.Key.GetID()
 			}
 		case waProto.ProtocolMessage_EPHEMERAL_SETTING:
 			protocolType = "ephemeral_setting"
@@ -479,7 +585,7 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 	} else if msg.PollUpdateMessage != nil {
 		payload.Type = "poll_vote"
 		pollVoteInfo := &PollVoteContent{
-			PollMessageID:   msg.PollUpdateMessage.GetPollCreationMessageKey().GetId(),
+			PollMessageID:   msg.PollUpdateMessage.GetPollCreationMessageKey().GetID(),
 			SelectedOptions: []string{},
 		}
 
@@ -494,8 +600,23 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 		}
 
 		payload.PollVote = pollVoteInfo
+	} else if msg.GetPollResultSnapshotMessage() != nil || msg.GetPollResultSnapshotMessageV3() != nil {
+		payload.Type = "poll_result"
+	} else if msg.GetNewsletterAdminInviteMessage() != nil {
+		payload.Type = "newsletter_admin_invite"
+	} else if msg.GetNewsletterFollowerInviteMessageV2() != nil {
+		payload.Type = "newsletter_follower_invite"
+	} else if msg.GetSenderKeyDistributionMessage() != nil || msg.GetFastRatchetKeySenderKeyDistributionMessage() != nil {
+		payload.Type = "sender_key_distribution"
 	} else {
 		payload.Type = "unknown"
+		if rawJSON, jerr := protojson.Marshal(msg); jerr == nil {
+			m.logger.Warnf("Unclassified message: device=%s msg_id=%s chat=%s sender=%s proto=%s",
+				deviceID, v.Info.ID, v.Info.Chat.String(), v.Info.Sender.String(), string(rawJSON))
+		} else {
+			m.logger.Warnf("Unclassified message (proto marshal failed): device=%s msg_id=%s err=%v",
+				deviceID, v.Info.ID, jerr)
+		}
 	}
 
 	return payload
@@ -514,7 +635,7 @@ func (m *Manager) handleHistorySync(deviceID string, client *whatsmeow.Client, h
 
 	// Process conversations in the history sync
 	for _, conversation := range historySync.Data.GetConversations() {
-		chatJID := conversation.GetId()
+		chatJID := conversation.GetID()
 		chatID = chatJID // Save for event (will be last processed chat)
 
 		// Process messages in this conversation
@@ -524,14 +645,39 @@ func (m *Manager) handleHistorySync(deviceID string, client *whatsmeow.Client, h
 				continue
 			}
 
+			// Skip messages without valid content
+			if webMsg.GetMessage() == nil {
+				m.logger.Debugf("Skipping history message without content: msg_id=%s", webMsg.Key.GetID())
+				continue
+			}
+
+			// Skip messages without valid key
+			if webMsg.Key == nil || webMsg.Key.GetID() == "" {
+				m.logger.Debugf("Skipping history message without valid key")
+				continue
+			}
+
+			// Get participant - handle both group and DM messages
+			participant := webMsg.Key.GetParticipant()
+			if participant == "" {
+				// For DM messages, participant might be empty, use chat JID
+				participant = chatJID
+			}
+
+			// Parse JID strings properly to separate User and Server parts
+			// (e.g., "51724307980293@lid" → User: "51724307980293", Server: "lid")
+			// Using NewJID would incorrectly put the full string as User with DefaultUserServer
+			chatParsedJID, _ := types.ParseJID(chatJID)
+			senderParsedJID, _ := types.ParseJID(participant)
+
 			// Create MessageInfo structure for extracting payload
 			msgInfo := &events.Message{
 				Info: types.MessageInfo{
 					MessageSource: types.MessageSource{
-						Chat:   types.NewJID(chatJID, types.DefaultUserServer),
-						Sender: types.NewJID(webMsg.Key.GetParticipant(), types.DefaultUserServer),
+						Chat:   chatParsedJID,
+						Sender: senderParsedJID,
 					},
-					ID:        webMsg.Key.GetId(),
+					ID:        webMsg.Key.GetID(),
 					Timestamp: time.UnixMilli(int64(webMsg.GetMessageTimestamp())),
 					PushName:  webMsg.GetPushName(),
 				},
@@ -540,6 +686,9 @@ func (m *Manager) handleHistorySync(deviceID string, client *whatsmeow.Client, h
 
 			// Extract message payload
 			payload := m.extractMessagePayload(deviceID, msgInfo, client)
+
+			// Always include the message - even "unknown" types may have metadata
+			// The nil checks in extractMessagePayload prevent panics
 			messages = append(messages, payload)
 		}
 	}
@@ -566,10 +715,20 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 		case *events.Message:
 			// Handle incoming message from WhatsApp
 			messagePayload := m.extractMessagePayload(deviceID, v, client)
+			sender, err := client.Store.LIDs.GetPNForLID(context.Background(), v.Info.Sender)
+			if err != nil {
+				m.logger.Errorf("Failed to get contact: %v", err)
+			}
+			conversation, err := client.Store.LIDs.GetPNForLID(context.Background(), v.Info.Chat)
+			if err != nil {
+				m.logger.Errorf("Failed to get conversation: %v", err)
+			}
 			m.publishEvent("message.received", MessageReceivedEvent{
-				DeviceID: deviceID,
-				Message:  messagePayload,
-				Source:   "whatsapp",
+				DeviceID:     deviceID,
+				Message:      messagePayload,
+				Sender:       sender,
+				Conversation: conversation,
+				Source:       "whatsapp",
 			})
 
 		case *events.Disconnected:
@@ -600,13 +759,17 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 		case *events.Connected:
 			// Handle successful connection
 			deviceJID := ""
+			deviceLID := ""
 			if client.Store.ID != nil {
 				deviceJID = client.Store.ID.User
+				deviceLID = fmt.Sprintf("%s@%s", client.Store.LID.User, client.Store.LID.Server)
 			}
 			m.publishEvent("device.connected", DeviceConnectedEvent{
-				DeviceID:  deviceID,
-				DeviceJID: deviceJID,
-				Status:    "connected",
+				DeviceID:    deviceID,
+				DeviceJID:   deviceJID,
+				PhoneNumber: deviceJID,
+				DeviceLID:   deviceLID,
+				Status:      "connected",
 			})
 
 		case *events.Receipt:
@@ -623,6 +786,11 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 		case *events.HistorySync:
 			// Handle history sync (automatic on first connection or manual request)
 			m.handleHistorySync(deviceID, client, v)
+
+		case *events.UndecryptableMessage:
+			m.logger.Warnf("Undecryptable message: device=%s msg_id=%s chat=%s sender=%s is_unavailable=%v unavailable_type=%q decrypt_fail_mode=%q",
+				deviceID, v.Info.ID, v.Info.Chat.String(), v.Info.Sender.String(),
+				v.IsUnavailable, v.UnavailableType, v.DecryptFailMode)
 		}
 	})
 }
@@ -700,7 +868,9 @@ func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, e
 
 				// Save device mapping to database
 				deviceJID := ""
+				deviceLID := ""
 				if device.Client.Store.ID != nil {
+					deviceLID = fmt.Sprintf("%s@%s", client.Store.LID.User, client.Store.LID.Server)
 					deviceJID = device.Client.Store.ID.User
 					if err := m.deviceDB.SaveMapping(deviceID, deviceJID); err != nil {
 						m.logger.Errorf("Failed to save device mapping: %v", err)
@@ -711,9 +881,11 @@ func (m *Manager) CreateDevice(ctx context.Context, deviceID string) (*Device, e
 
 				// Publish device connected event
 				m.publishEvent("device.connected", DeviceConnectedEvent{
-					DeviceID:  deviceID,
-					DeviceJID: deviceJID,
-					Status:    "connected",
+					DeviceID:    deviceID,
+					DeviceJID:   deviceJID,
+					DeviceLID:   deviceLID,
+					PhoneNumber: deviceJID,
+					Status:      "connected",
 				})
 			}
 		}
@@ -774,6 +946,72 @@ func (m *Manager) GetDevice(id string) (*Device, bool) {
 
 	device, ok := m.devices[id]
 	return device, ok
+}
+
+// GetClient returns the whatsmeow client for a device
+// Returns ErrDeviceNotFound if device doesn't exist, ErrDeviceNotConnected if not connected
+func (m *Manager) GetClient(deviceID string) (*whatsmeow.Client, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	device, ok := m.devices[deviceID]
+	if !ok {
+		return nil, ErrDeviceNotFound
+	}
+
+	if device.Status != "connected" {
+		return nil, ErrDeviceNotConnected
+	}
+
+	return device.Client, nil
+}
+
+// LogoutDevice logs out a device permanently (requires QR re-scan to reconnect)
+// This method removes the device from memory, database, and WhatsApp's session
+func (m *Manager) LogoutDevice(ctx context.Context, deviceID string, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Lookup device
+	device, ok := m.devices[deviceID]
+	if !ok {
+		// Device not found - this is not an error, treat as idempotent
+		m.logger.Warnf("Logout requested for non-existent device: %s (already removed)", deviceID)
+		return nil
+	}
+
+	// Get device JID before logout
+	deviceJID := ""
+	if device.Client.Store.ID != nil {
+		deviceJID = device.Client.Store.ID.User
+	}
+
+	// Call WhatsApp client logout
+	err := device.Client.Logout(ctx)
+	if err != nil {
+		m.logger.Errorf("Failed to logout device %s from WhatsApp: %v", deviceID, err)
+		// Continue with cleanup even if WhatsApp logout fails
+	}
+
+	// Remove from devices map
+	delete(m.devices, deviceID)
+
+	// Delete from database
+	if err := m.deviceDB.DeleteMapping(deviceID); err != nil {
+		m.logger.Errorf("Failed to delete device mapping for %s: %v", deviceID, err)
+		// Continue - we already logged out from WhatsApp
+	} else {
+		m.logger.Infof("Deleted device mapping: %s", deviceID)
+	}
+
+	// Publish logout event
+	m.publishEvent("device.logout", DeviceLogoutEvent{
+		DeviceID: deviceID,
+		Reason:   reason,
+	})
+
+	m.logger.Infof("Device logged out successfully: %s (JID: %s, reason: %s)", deviceID, deviceJID, reason)
+	return nil
 }
 
 // GetGroupInfo retrieves group information for a given device and group JID
@@ -930,6 +1168,18 @@ type SendImageMessageRequest struct {
 	Duration       uint32 `json:"duration,omitempty"`
 }
 
+// SendVideoMessageRequest represents a video message request
+type SendVideoMessageRequest struct {
+	DeviceID       string `json:"device_id"`
+	ChatID         string `json:"chat_id"`
+	FileURL        string `json:"file_url"`
+	Caption        string `json:"caption,omitempty"`
+	ReplyMessageID string `json:"reply_message_id,omitempty"`
+	IsForwarded    bool   `json:"is_forwarded"`
+	ViewOnce       bool   `json:"view_once"`
+	Duration       uint32 `json:"duration,omitempty"`
+}
+
 // SendFileMessageRequest represents a file message request
 type SendFileMessageRequest struct {
 	DeviceID       string `json:"device_id"`
@@ -1072,6 +1322,73 @@ func (m *Manager) SendImageMessage(ctx context.Context, req SendImageMessageRequ
 
 	// Publish event for image message sent from HTTP handler
 	m.publishEvent("message.image.sent", MessageImageSentEvent{
+		DeviceID:  req.DeviceID,
+		ChatID:    req.ChatID,
+		MessageID: resp.ID,
+		Source:    "http",
+	})
+
+	return &MessageResponse{
+		MessageID: resp.ID,
+	}, nil
+}
+
+// SendVideoMessage sends a video message
+func (m *Manager) SendVideoMessage(ctx context.Context, req SendVideoMessageRequest) (*MessageResponse, error) {
+	device, ok := m.GetDevice(req.DeviceID)
+	if !ok {
+		return nil, fmt.Errorf("device not found: %s", req.DeviceID)
+	}
+
+	jid, err := types.ParseJID(req.ChatID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chat ID: %w", err)
+	}
+
+	// Download video from URL
+	httpResp, err := http.Get(req.FileURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download video: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	videoData, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read video: %w", err)
+	}
+
+	// Upload video to WhatsApp
+	uploaded, err := device.Client.Upload(ctx, videoData, whatsmeow.MediaVideo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload video: %w", err)
+	}
+
+	msg := &waProto.Message{
+		VideoMessage: &waProto.VideoMessage{
+			Caption:       proto.String(req.Caption),
+			URL:           proto.String(uploaded.URL),
+			DirectPath:    proto.String(uploaded.DirectPath),
+			MediaKey:      uploaded.MediaKey,
+			Mimetype:      proto.String(httpResp.Header.Get("Content-Type")),
+			FileEncSHA256: uploaded.FileEncSHA256,
+			FileSHA256:    uploaded.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(videoData))),
+			ViewOnce:      proto.Bool(req.ViewOnce),
+		},
+	}
+
+	resp, err := device.Client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		m.publishEvent("message.video.failed", MessageVideoFailedEvent{
+			DeviceID: req.DeviceID,
+			ChatID:   req.ChatID,
+			Error:    err.Error(),
+		})
+		return nil, fmt.Errorf("failed to send video: %w", err)
+	}
+
+	// Publish event for video message sent from HTTP handler
+	m.publishEvent("message.video.sent", MessageVideoSentEvent{
 		DeviceID:  req.DeviceID,
 		ChatID:    req.ChatID,
 		MessageID: resp.ID,

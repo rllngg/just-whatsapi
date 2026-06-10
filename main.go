@@ -75,13 +75,7 @@ func main() {
 	// Set event publisher
 	manager.SetEventPublisher(eventBus)
 
-	// Restore previously connected devices (failover recovery)
-	fmt.Println("Restoring previously connected devices...")
-	if err := manager.RestoreDevices(context.Background()); err != nil {
-		log.Printf("Warning: Failed to restore devices: %v", err)
-	}
-
-	// Initialize Renr queue plugin
+	// Initialize Renr queue plugin (must be before RestoreDevices so subscribers are ready)
 	fmt.Println("Initializing Renr queue plugin...")
 	renrPlugin, err := renr.NewPlugin(manager, eventBus, waLogger)
 	if err != nil {
@@ -95,6 +89,14 @@ func main() {
 			defer renrPlugin.Stop()
 			fmt.Println("Renr queue plugin started successfully")
 		}
+	}
+
+	// Restore previously connected devices (failover recovery)
+	// This must happen AFTER all plugins are started, because RestoreDevices
+	// publishes device.restored events that plugins need to receive.
+	fmt.Println("Restoring previously connected devices...")
+	if err := manager.RestoreDevices(context.Background()); err != nil {
+		log.Printf("Warning: Failed to restore devices: %v", err)
 	}
 
 	// Create Fiber HTTP server

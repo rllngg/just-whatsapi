@@ -1,0 +1,8 @@
+POST https://app.renr.ai/system/queue/test
+Content-Type: application/json
+Authorization: Basic d2hhdHNhcHA6d2hhdHNhcHA=
+
+{
+    "payload": "test",
+    "ref": ""
+}

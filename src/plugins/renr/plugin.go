@@ -25,6 +25,12 @@ type EventSubscriber interface {
 	Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error)
 }
 
+// avatarCacheEntry represents a cached avatar URL with timestamp
+type avatarCacheEntry struct {
+	URL       string
+	FetchedAt time.Time
+}
+
 // Plugin handles Renr queue integration via events
 type Plugin struct {
 	manager     *whatsapp.Manager
@@ -38,9 +44,14 @@ type Plugin struct {
 	deliveryService *DeliveryService
 
 	// Subscriber management
-	messageSubscribers map[string]*renrqueue.Subscriber // deviceID -> subscriber
-	qrSubscriber       *renrqueue.Subscriber            // QR request subscriber
-	subscribersMu      sync.RWMutex
+	messageSubscribers   map[string]*renrqueue.Subscriber // deviceID -> subscriber
+	qrSubscriber         *renrqueue.Subscriber            // QR request subscriber
+	disconnectSubscriber *renrqueue.Subscriber            // Disconnect request subscriber
+	subscribersMu        sync.RWMutex
+
+	// Avatar cache (key: "deviceID:jid")
+	avatarCache   map[string]avatarCacheEntry
+	avatarCacheMu sync.RWMutex
 
 	// S3 configuration (separate from webhook plugin)
 	s3Enabled         bool
@@ -147,6 +158,7 @@ func NewPlugin(manager *whatsapp.Manager, eventBus EventSubscriber, logger waLog
 		db:                 db,
 		deliveryService:    deliveryService,
 		messageSubscribers: make(map[string]*renrqueue.Subscriber),
+		avatarCache:        make(map[string]avatarCacheEntry),
 		ctx:                ctx,
 		cancel:             cancel,
 		// S3 configuration
@@ -190,6 +202,12 @@ func (p *Plugin) Start() error {
 		// Don't fail the whole plugin, continue
 	}
 
+	// Start disconnect request subscriber
+	if err := p.startDisconnectSubscriber(); err != nil {
+		p.logger.Errorf("Failed to start disconnect subscriber: %v", err)
+		// Don't fail the whole plugin, continue
+	}
+
 	// Subscribe to device lifecycle events
 	go p.subscribeToEvent("device.connected", p.handleDeviceConnected)
 	go p.subscribeToEvent("device.connected", p.handleDeviceConnectedForQR) // Also send QR connected status
@@ -224,6 +242,12 @@ func (p *Plugin) Stop() error {
 	if p.qrSubscriber != nil {
 		p.qrSubscriber.Stop()
 		p.logger.Infof("Stopped QR request subscriber")
+	}
+
+	// Stop disconnect subscriber
+	if p.disconnectSubscriber != nil {
+		p.disconnectSubscriber.Stop()
+		p.logger.Infof("Stopped disconnect request subscriber")
 	}
 
 	// Stop all message subscribers

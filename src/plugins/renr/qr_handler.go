@@ -60,7 +60,7 @@ func (p *Plugin) handleQRRequest(msg *renrqueue.QueueItemResponse) error {
 
 		// Send error update
 		errorMsg := fmt.Sprintf("Failed to create device: %v", err)
-		p.sendChannelUpdate(request.Channel.ID, "ERROR", deviceID, nil, &errorMsg)
+		p.sendChannelUpdate(request.Channel.ID, "", "ERROR", deviceID, nil, &errorMsg)
 		return err
 	}
 
@@ -68,14 +68,14 @@ func (p *Plugin) handleQRRequest(msg *renrqueue.QueueItemResponse) error {
 	qrCode := p.waitForQRCode(device, 30*time.Second)
 	if qrCode == "" {
 		errorMsg := "QR code generation timeout"
-		p.sendChannelUpdate(request.Channel.ID, "ERROR", deviceID, nil, &errorMsg)
+		p.sendChannelUpdate(request.Channel.ID, "", "ERROR", deviceID, nil, &errorMsg)
 		return fmt.Errorf("%s", errorMsg)
 	}
 
 	p.logger.Infof("QR code generated: channel_id=%d", request.Channel.ID)
 
 	// Send QR ready update
-	p.sendChannelUpdate(request.Channel.ID, "WAITING_INTEGRATION", deviceID, &qrCode, nil)
+	p.sendChannelUpdate(request.Channel.ID, "", "WAITING_INTEGRATION", deviceID, &qrCode, nil)
 
 	return nil
 }
@@ -95,8 +95,9 @@ func (p *Plugin) waitForQRCode(device *whatsapp.Device, timeout time.Duration) s
 }
 
 // sendChannelUpdate sends channel update to queue
-func (p *Plugin) sendChannelUpdate(channelID int64, status, reference string, data, errorReason *string) {
+func (p *Plugin) sendChannelUpdate(channelID int64, name string, status, reference string, data, errorReason *string) {
 	update := QueueChannelUpdate{
+		Name:        name,
 		ChannelID:   channelID,
 		Status:      status,
 		Reference:   reference,
@@ -109,10 +110,9 @@ func (p *Plugin) sendChannelUpdate(channelID int64, status, reference string, da
 		p.logger.Errorf("Failed to marshal channel update: %v", err)
 		return
 	}
-
-	ref := reference
-	_, err = p.queueClient.Enqueue("channel-update", renrqueue.EnqueueRequest{
-		Ref:     &ref,
+	channelIDStr := strconv.FormatInt(channelID, 10)
+	res, err := p.queueClient.Enqueue("channel-update", renrqueue.EnqueueRequest{
+		Ref:     &channelIDStr,
 		Payload: string(payload),
 	})
 
@@ -121,7 +121,7 @@ func (p *Plugin) sendChannelUpdate(channelID int64, status, reference string, da
 		return
 	}
 
-	p.logger.Infof("Channel update sent: channel_id=%d, status=%s", channelID, status)
+	p.logger.Infof("Channel update sent: channel_id=%d, status=%s, id=%s", channelID, status, res.ID)
 }
 
 // handleDeviceConnectedForQR sends CONNECTED status to queue
@@ -138,9 +138,9 @@ func (p *Plugin) handleDeviceConnectedForQR(msg *message.Message) error {
 		return nil // Don't fail, just skip
 	}
 
-	// Send CONNECTED update
-	p.sendChannelUpdate(channelID, "CONNECTED", event.DeviceID, nil, nil)
-	p.logger.Infof("Device connected, sent CONNECTED status: channel_id=%d", channelID)
+	// Send CONNECTED update with user's WhatsApp JID as reference
+	p.sendChannelUpdate(channelID, event.PhoneNumber, "CONNECTED", fmt.Sprintf("%s@s.whatsapp.net", event.PhoneNumber), nil, nil)
+	p.logger.Infof("Device connected, sent CONNECTED status: channel_id=%d, jid=%s, lid=%s, phoneNumber", channelID, event.DeviceJID, event.DeviceLID)
 
 	return nil
 }
