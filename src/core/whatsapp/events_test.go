@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -352,5 +353,104 @@ func TestBackwardCompatibility(t *testing.T) {
 	// Media field should be nil for old-style messages
 	if decoded.Media != nil {
 		t.Error("Media field should be nil for old-style messages")
+	}
+}
+
+func TestQuotedMessageJSONMarshaling(t *testing.T) {
+	original := &QuotedMessage{
+		MessageID:   "3EB0ABCDEF",
+		Participant: "6281111111111@s.whatsapp.net",
+		ChatID:      "status@broadcast",
+		FromMe:      true,
+		Type:        "image",
+		Preview:     "a caption",
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Failed to marshal QuotedMessage: %v", err)
+	}
+
+	var decoded QuotedMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal QuotedMessage: %v", err)
+	}
+
+	if decoded.MessageID != original.MessageID {
+		t.Errorf("MessageID = %q, want %q", decoded.MessageID, original.MessageID)
+	}
+	if decoded.Participant != original.Participant {
+		t.Errorf("Participant = %q, want %q", decoded.Participant, original.Participant)
+	}
+	if decoded.ChatID != original.ChatID {
+		t.Errorf("ChatID = %q, want %q", decoded.ChatID, original.ChatID)
+	}
+	if !decoded.FromMe {
+		t.Error("FromMe not preserved")
+	}
+	if decoded.Type != original.Type {
+		t.Errorf("Type = %q, want %q", decoded.Type, original.Type)
+	}
+	if decoded.Preview != original.Preview {
+		t.Errorf("Preview = %q, want %q", decoded.Preview, original.Preview)
+	}
+}
+
+func TestMessagePayloadWithQuoted(t *testing.T) {
+	payload := MessagePayload{
+		MessageID: "MSG1",
+		ChatID:    "6281111111111@s.whatsapp.net",
+		Type:      "text",
+		Text:      &TextContent{Content: "my reply"},
+		Quoted: &QuotedMessage{
+			MessageID:   "PARENT",
+			Participant: "6282222222222@s.whatsapp.net",
+			Type:        "text",
+			Preview:     "the original",
+		},
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Failed to marshal payload: %v", err)
+	}
+
+	var decoded MessagePayload
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal payload: %v", err)
+	}
+
+	if decoded.Quoted == nil {
+		t.Fatal("Quoted not preserved")
+	}
+	if decoded.Quoted.MessageID != "PARENT" {
+		t.Errorf("Quoted.MessageID = %q", decoded.Quoted.MessageID)
+	}
+	if decoded.Quoted.Preview != "the original" {
+		t.Errorf("Quoted.Preview = %q", decoded.Quoted.Preview)
+	}
+}
+
+// TestMessagePayloadQuotedOmittedWhenNil guards the additive property of the
+// contract: a non-reply message must serialize exactly as it did before.
+func TestMessagePayloadQuotedOmittedWhenNil(t *testing.T) {
+	payload := MessagePayload{
+		MessageID: "MSG1",
+		ChatID:    "6281111111111@s.whatsapp.net",
+		Type:      "text",
+		Text:      &TextContent{Content: "plain message"},
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Failed to marshal payload: %v", err)
+	}
+
+	jsonStr := string(data)
+	if strings.Contains(jsonStr, "quoted") {
+		t.Errorf("expected no quoted key for a non-reply, got: %s", jsonStr)
+	}
+	if strings.Contains(jsonStr, "is_forwarded") {
+		t.Errorf("expected no is_forwarded key when false, got: %s", jsonStr)
 	}
 }

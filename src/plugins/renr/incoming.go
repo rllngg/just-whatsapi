@@ -151,7 +151,6 @@ func (p *Plugin) convertToQueueChatMessage(event whatsapp.MessageReceivedEvent) 
 
 	// Build body based on message type
 	var body QueueChatBody
-	var replyTo *string
 
 	switch event.Message.Type {
 	case "text":
@@ -434,8 +433,25 @@ func (p *Plugin) convertToQueueChatMessage(event whatsapp.MessageReceivedEvent) 
 		}
 	}
 
-	// TODO: Extract reply_to if available from event
-	// For now, leave it nil
+	// Reply context. ReplyTo carries the bare ID for existing consumers, Quoted
+	// carries everything needed to render a quote bubble without a lookup.
+	var replyTo *string
+	var quoted *QuotedData
+	if q := event.Message.Quoted; q != nil {
+		messageID := q.MessageID
+		replyTo = &messageID
+		quoted = &QuotedData{
+			MessageID:   q.MessageID,
+			Participant: q.Participant,
+			ChatID:      q.ChatID,
+			FromMe:      q.FromMe,
+			Type:        q.Type,
+			Preview:     q.Preview,
+		}
+		if q.Participant != "" {
+			quoted.Phone = extractPhoneFromJID(q.Participant)
+		}
+	}
 
 	queueMsg := &QueueChatMessage{
 		ChannelID: channelID,
@@ -444,6 +460,7 @@ func (p *Plugin) convertToQueueChatMessage(event whatsapp.MessageReceivedEvent) 
 		To:        to,
 		From:      from,
 		ReplyTo:   replyTo,
+		Quoted:    quoted,
 		Body:      body,
 		Timestamp: event.Message.Timestamp,
 	}

@@ -9,6 +9,18 @@ type QueueChatPerson struct {
 	AvatarURL string `json:"avatarURL,omitempty"` // S3 URL of profile picture
 }
 
+// QuotedData describes the message a reply is quoting. Mirrors
+// whatsapp.QuotedMessage for the queue contract.
+type QuotedData struct {
+	MessageID   string `json:"message_id"`
+	Participant string `json:"participant,omitempty"` // Sender JID of the quoted message
+	Phone       string `json:"phone,omitempty"`       // Phone number extracted from Participant
+	ChatID      string `json:"chat_id,omitempty"`     // Only set for cross-chat quotes
+	FromMe      bool   `json:"from_me"`
+	Type        string `json:"type,omitempty"`    // Quoted message type
+	Preview     string `json:"preview,omitempty"` // Short text/caption excerpt
+}
+
 // QueueChatMessage represents a chat message in queue
 type QueueChatMessage struct {
 	ChannelID int64           `json:"channel_id"`
@@ -16,9 +28,14 @@ type QueueChatMessage struct {
 	Ref       string          `json:"ref"`
 	To        QueueChatPerson `json:"to"`
 	From      QueueChatPerson `json:"from"`
-	ReplyTo   *string         `json:"reply_to,omitempty"`
-	Body      QueueChatBody   `json:"body"`
-	Timestamp int64           `json:"timestamp"`
+	// ReplyTo is the quoted message ID. Retained for backward compatibility;
+	// new consumers should prefer Quoted.
+	ReplyTo *string `json:"reply_to,omitempty"`
+	// Quoted carries the full reply context so consumers can render a quote
+	// bubble without a lookup
+	Quoted    *QuotedData   `json:"quoted,omitempty"`
+	Body      QueueChatBody `json:"body"`
+	Timestamp int64         `json:"timestamp"`
 }
 
 // QueueChatBody represents message content

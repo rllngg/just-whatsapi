@@ -159,10 +159,11 @@ func (p *Plugin) sendTextMessage(deviceID string, msg QueueChatMessage) error {
 	chatID := msg.To.ID
 
 	req := whatsapp.SendTextMessageRequest{
-		DeviceID:       deviceID,
-		ChatID:         chatID,
-		Message:        msg.Body.Content,
-		ReplyMessageID: getStringValue(msg.ReplyTo),
+		DeviceID:         deviceID,
+		ChatID:           chatID,
+		Message:          msg.Body.Content,
+		ReplyMessageID:   quotedMessageID(msg),
+		ReplyParticipant: quotedParticipant(msg),
 	}
 
 	_, err := p.manager.SendTextMessage(context.Background(), req)
@@ -184,11 +185,12 @@ func (p *Plugin) sendImageMessage(deviceID string, msg QueueChatMessage) error {
 	chatID := msg.To.ID
 
 	req := whatsapp.SendImageMessageRequest{
-		DeviceID:       deviceID,
-		ChatID:         chatID,
-		FileURL:        msg.Body.FilesURL[0],
-		Caption:        msg.Body.Content,
-		ReplyMessageID: getStringValue(msg.ReplyTo),
+		DeviceID:         deviceID,
+		ChatID:           chatID,
+		FileURL:          msg.Body.FilesURL[0],
+		Caption:          msg.Body.Content,
+		ReplyMessageID:   quotedMessageID(msg),
+		ReplyParticipant: quotedParticipant(msg),
 	}
 
 	_, err := p.manager.SendImageMessage(context.Background(), req)
@@ -210,11 +212,12 @@ func (p *Plugin) sendDocumentMessage(deviceID string, msg QueueChatMessage) erro
 	chatID := msg.To.ID
 
 	req := whatsapp.SendFileMessageRequest{
-		DeviceID:       deviceID,
-		ChatID:         chatID,
-		FileURL:        msg.Body.FilesURL[0],
-		Caption:        msg.Body.Content,
-		ReplyMessageID: getStringValue(msg.ReplyTo),
+		DeviceID:         deviceID,
+		ChatID:           chatID,
+		FileURL:          msg.Body.FilesURL[0],
+		Caption:          msg.Body.Content,
+		ReplyMessageID:   quotedMessageID(msg),
+		ReplyParticipant: quotedParticipant(msg),
 	}
 
 	_, err := p.manager.SendFileMessage(context.Background(), req)
@@ -235,11 +238,12 @@ func (p *Plugin) sendVideoMessage(deviceID string, msg QueueChatMessage) error {
 	chatID := msg.To.ID
 
 	req := whatsapp.SendVideoMessageRequest{
-		DeviceID:       deviceID,
-		ChatID:         chatID,
-		FileURL:        msg.Body.FilesURL[0],
-		Caption:        msg.Body.Content,
-		ReplyMessageID: getStringValue(msg.ReplyTo),
+		DeviceID:         deviceID,
+		ChatID:           chatID,
+		FileURL:          msg.Body.FilesURL[0],
+		Caption:          msg.Body.Content,
+		ReplyMessageID:   quotedMessageID(msg),
+		ReplyParticipant: quotedParticipant(msg),
 	}
 
 	_, err := p.manager.SendVideoMessage(context.Background(), req)
@@ -262,11 +266,12 @@ func (p *Plugin) sendAudioMessage(deviceID string, msg QueueChatMessage) error {
 
 	// Audio uses the file endpoint in the manager
 	req := whatsapp.SendFileMessageRequest{
-		DeviceID:       deviceID,
-		ChatID:         chatID,
-		FileURL:        msg.Body.FilesURL[0],
-		Caption:        msg.Body.Content,
-		ReplyMessageID: getStringValue(msg.ReplyTo),
+		DeviceID:         deviceID,
+		ChatID:           chatID,
+		FileURL:          msg.Body.FilesURL[0],
+		Caption:          msg.Body.Content,
+		ReplyMessageID:   quotedMessageID(msg),
+		ReplyParticipant: quotedParticipant(msg),
 	}
 
 	_, err := p.manager.SendFileMessage(context.Background(), req)
@@ -288,11 +293,12 @@ func (p *Plugin) sendFileMessage(deviceID string, msg QueueChatMessage) error {
 	chatID := msg.To.ID
 
 	req := whatsapp.SendFileMessageRequest{
-		DeviceID:       deviceID,
-		ChatID:         chatID,
-		FileURL:        msg.Body.FilesURL[0],
-		Caption:        msg.Body.Content,
-		ReplyMessageID: getStringValue(msg.ReplyTo),
+		DeviceID:         deviceID,
+		ChatID:           chatID,
+		FileURL:          msg.Body.FilesURL[0],
+		Caption:          msg.Body.Content,
+		ReplyMessageID:   quotedMessageID(msg),
+		ReplyParticipant: quotedParticipant(msg),
 	}
 
 	_, err := p.manager.SendFileMessage(context.Background(), req)

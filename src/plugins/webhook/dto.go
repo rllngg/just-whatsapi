@@ -128,6 +128,22 @@ type DocumentContent struct {
 	MediaURL string `json:"media_url,omitempty"`
 }
 
+// QuotedMessage describes the message that a reply is quoting
+type QuotedMessage struct {
+	// MessageID is the WhatsApp stanza ID of the quoted message
+	MessageID string `json:"message_id"`
+	// Participant is the JID of the quoted message's sender
+	Participant string `json:"participant,omitempty"`
+	// ChatID is only set for cross-chat quotes such as status replies
+	ChatID string `json:"chat_id,omitempty"`
+	// FromMe indicates the quoted message was sent by this device
+	FromMe bool `json:"from_me"`
+	// Type is the quoted message's type
+	Type string `json:"type,omitempty"`
+	// Preview is a short text or caption excerpt of the quoted message
+	Preview string `json:"preview,omitempty"`
+}
+
 // MessageContent represents the content of a WhatsApp message
 type MessageContent struct {
 	// MessageID is the unique WhatsApp message identifier
@@ -154,6 +170,10 @@ type MessageContent struct {
 	Document *DocumentContent `json:"document,omitempty"`
 	// HasMedia indicates if this message contains media content
 	HasMedia bool `json:"has_media,omitempty"`
+	// Quoted is set when this message is a reply to another message
+	Quoted *QuotedMessage `json:"quoted,omitempty"`
+	// IsForwarded indicates the message was forwarded
+	IsForwarded bool `json:"is_forwarded,omitempty"`
 }
 
 // MessageReceivedPayload is sent when a message is received from WhatsApp

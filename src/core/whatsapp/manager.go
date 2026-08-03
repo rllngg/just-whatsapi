@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ type Manager struct {
 	deviceDB  *DeviceDatabase
 	logger    waLog.Logger
 	publisher EventPublisher
+	msgCache  *messageCache
 	mu        sync.RWMutex
 }
 
@@ -69,11 +71,17 @@ func NewManager(dbPath string, logger waLog.Logger) (*Manager, error) {
 		return nil, fmt.Errorf("failed to create device database: %w", err)
 	}
 
+	// Cache of recently seen messages, used to embed faithful quotes when
+	// sending replies. Sizes are overridable for high-volume deployments.
+	cacheSize := messageCacheSizeFromEnv(os.Getenv("WA_MESSAGE_CACHE_SIZE"), defaultMessageCacheSize)
+	cacheTTL := messageCacheTTLFromEnv(os.Getenv("WA_MESSAGE_CACHE_TTL"), defaultMessageCacheTTL)
+
 	return &Manager{
 		devices:   make(map[string]*Device),
 		container: container,
 		deviceDB:  deviceDB,
 		logger:    logger,
+		msgCache:  newMessageCache(cacheSize, cacheTTL),
 	}, nil
 }
 
@@ -232,6 +240,13 @@ classify:
 	if msg == nil {
 		payload.Type = "unknown"
 		return payload
+	}
+
+	// Reply/forward context lives on the unwrapped message and is type-agnostic,
+	// so extracting it here covers every classification branch below.
+	if ci := extractContextInfo(msg); ci != nil {
+		payload.IsForwarded = ci.GetIsForwarded()
+		payload.Quoted = buildQuotedMessage(ci, selfJID(client))
 	}
 
 	if msg.Conversation != nil {
@@ -715,6 +730,12 @@ func (m *Manager) setupEventHandlers(deviceID string, client *whatsmeow.Client) 
 		case *events.Message:
 			// Handle incoming message from WhatsApp
 			messagePayload := m.extractMessagePayload(deviceID, v, client)
+
+			// Remember the message so a later reply can embed a faithful quote.
+			// Deliberately not done for history sync, which would flood the
+			// cache and evict everything recent.
+			m.msgCache.Put(deviceID, v.Info.Chat, v.Info.ID, v.Info.Sender, v.Info.IsFromMe, v.Message)
+
 			sender, err := client.Store.LIDs.GetPNForLID(context.Background(), v.Info.Sender)
 			if err != nil {
 				m.logger.Errorf("Failed to get contact: %v", err)
@@ -1152,8 +1173,11 @@ type SendTextMessageRequest struct {
 	ChatID         string `json:"chat_id"`
 	Message        string `json:"message"`
 	ReplyMessageID string `json:"reply_message_id,omitempty"`
-	IsForwarded    bool   `json:"is_forwarded"`
-	Duration       uint32 `json:"duration,omitempty"`
+	// ReplyParticipant is the JID of the quoted message's sender. Optional:
+	// when empty it is resolved from the message cache, or inferred for DMs.
+	ReplyParticipant string `json:"reply_participant,omitempty"`
+	IsForwarded      bool   `json:"is_forwarded"`
+	Duration         uint32 `json:"duration,omitempty"`
 }
 
 // SendImageMessageRequest represents an image message request
@@ -1163,9 +1187,12 @@ type SendImageMessageRequest struct {
 	FileURL        string `json:"file_url"`
 	Caption        string `json:"caption,omitempty"`
 	ReplyMessageID string `json:"reply_message_id,omitempty"`
-	IsForwarded    bool   `json:"is_forwarded"`
-	ViewOnce       bool   `json:"view_once"`
-	Duration       uint32 `json:"duration,omitempty"`
+	// ReplyParticipant is the JID of the quoted message's sender. Optional:
+	// when empty it is resolved from the message cache, or inferred for DMs.
+	ReplyParticipant string `json:"reply_participant,omitempty"`
+	IsForwarded      bool   `json:"is_forwarded"`
+	ViewOnce         bool   `json:"view_once"`
+	Duration         uint32 `json:"duration,omitempty"`
 }
 
 // SendVideoMessageRequest represents a video message request
@@ -1175,9 +1202,12 @@ type SendVideoMessageRequest struct {
 	FileURL        string `json:"file_url"`
 	Caption        string `json:"caption,omitempty"`
 	ReplyMessageID string `json:"reply_message_id,omitempty"`
-	IsForwarded    bool   `json:"is_forwarded"`
-	ViewOnce       bool   `json:"view_once"`
-	Duration       uint32 `json:"duration,omitempty"`
+	// ReplyParticipant is the JID of the quoted message's sender. Optional:
+	// when empty it is resolved from the message cache, or inferred for DMs.
+	ReplyParticipant string `json:"reply_participant,omitempty"`
+	IsForwarded      bool   `json:"is_forwarded"`
+	ViewOnce         bool   `json:"view_once"`
+	Duration         uint32 `json:"duration,omitempty"`
 }
 
 // SendFileMessageRequest represents a file message request
@@ -1187,8 +1217,11 @@ type SendFileMessageRequest struct {
 	FileURL        string `json:"file_url"`
 	Caption        string `json:"caption,omitempty"`
 	ReplyMessageID string `json:"reply_message_id,omitempty"`
-	IsForwarded    bool   `json:"is_forwarded"`
-	Duration       uint32 `json:"duration,omitempty"`
+	// ReplyParticipant is the JID of the quoted message's sender. Optional:
+	// when empty it is resolved from the message cache, or inferred for DMs.
+	ReplyParticipant string `json:"reply_participant,omitempty"`
+	IsForwarded      bool   `json:"is_forwarded"`
+	Duration         uint32 `json:"duration,omitempty"`
 }
 
 // SendPresenceRequest represents a presence update request
@@ -1239,8 +1272,23 @@ func (m *Manager) SendTextMessage(ctx context.Context, req SendTextMessageReques
 		return nil, fmt.Errorf("invalid chat ID: %w", err)
 	}
 
-	msg := &waProto.Message{
-		Conversation: proto.String(req.Message),
+	// A quote can only be attached to ExtendedTextMessage, never to a plain
+	// Conversation. Keep Conversation when there is no context so the common
+	// path stays byte-identical to before.
+	ctxInfo := m.buildOutgoingContextInfo(ctx, req.DeviceID, device, jid, req.ReplyMessageID, req.ReplyParticipant, req.IsForwarded)
+
+	var msg *waProto.Message
+	if ctxInfo != nil {
+		msg = &waProto.Message{
+			ExtendedTextMessage: &waProto.ExtendedTextMessage{
+				Text:        proto.String(req.Message),
+				ContextInfo: ctxInfo,
+			},
+		}
+	} else {
+		msg = &waProto.Message{
+			Conversation: proto.String(req.Message),
+		}
 	}
 
 	resp, err := device.Client.SendMessage(ctx, jid, msg)
@@ -1252,6 +1300,8 @@ func (m *Manager) SendTextMessage(ctx context.Context, req SendTextMessageReques
 		})
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
+
+	m.cacheSentMessage(req.DeviceID, device, jid, resp.ID, msg)
 
 	// Publish event for message sent from HTTP handler
 	m.publishEvent("message.text.sent", MessageTextSentEvent{
@@ -1307,6 +1357,7 @@ func (m *Manager) SendImageMessage(ctx context.Context, req SendImageMessageRequ
 			FileSHA256:    uploaded.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(imageData))),
 			ViewOnce:      proto.Bool(req.ViewOnce),
+			ContextInfo:   m.buildOutgoingContextInfo(ctx, req.DeviceID, device, jid, req.ReplyMessageID, req.ReplyParticipant, req.IsForwarded),
 		},
 	}
 
@@ -1319,6 +1370,8 @@ func (m *Manager) SendImageMessage(ctx context.Context, req SendImageMessageRequ
 		})
 		return nil, fmt.Errorf("failed to send image: %w", err)
 	}
+
+	m.cacheSentMessage(req.DeviceID, device, jid, resp.ID, msg)
 
 	// Publish event for image message sent from HTTP handler
 	m.publishEvent("message.image.sent", MessageImageSentEvent{
@@ -1374,6 +1427,7 @@ func (m *Manager) SendVideoMessage(ctx context.Context, req SendVideoMessageRequ
 			FileSHA256:    uploaded.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(videoData))),
 			ViewOnce:      proto.Bool(req.ViewOnce),
+			ContextInfo:   m.buildOutgoingContextInfo(ctx, req.DeviceID, device, jid, req.ReplyMessageID, req.ReplyParticipant, req.IsForwarded),
 		},
 	}
 
@@ -1386,6 +1440,8 @@ func (m *Manager) SendVideoMessage(ctx context.Context, req SendVideoMessageRequ
 		})
 		return nil, fmt.Errorf("failed to send video: %w", err)
 	}
+
+	m.cacheSentMessage(req.DeviceID, device, jid, resp.ID, msg)
 
 	// Publish event for video message sent from HTTP handler
 	m.publishEvent("message.video.sent", MessageVideoSentEvent{
@@ -1440,6 +1496,7 @@ func (m *Manager) SendFileMessage(ctx context.Context, req SendFileMessageReques
 			FileEncSHA256: uploaded.FileEncSHA256,
 			FileSHA256:    uploaded.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(fileData))),
+			ContextInfo:   m.buildOutgoingContextInfo(ctx, req.DeviceID, device, jid, req.ReplyMessageID, req.ReplyParticipant, req.IsForwarded),
 		},
 	}
 
@@ -1452,6 +1509,8 @@ func (m *Manager) SendFileMessage(ctx context.Context, req SendFileMessageReques
 		})
 		return nil, fmt.Errorf("failed to send file: %w", err)
 	}
+
+	m.cacheSentMessage(req.DeviceID, device, jid, resp.ID, msg)
 
 	// Publish event for file message sent from HTTP handler
 	m.publishEvent("message.file.sent", MessageFileSentEvent{

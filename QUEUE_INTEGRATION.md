@@ -148,6 +148,40 @@ RENR_QUEUE_PASSWORD=your-password
 }
 ```
 
+### Reply / Quoted Messages
+
+Chat payloads on `channel-chat-message-incoming` and
+`channel-chat-message-outgoing` carry reply context in two fields:
+
+| Field | Direction | Notes |
+|-------|-----------|-------|
+| `reply_to` | both | Quoted message ID. Omitted when the message is not a reply |
+| `quoted` | both | Structured reply context. Omitted when the message is not a reply |
+
+```json
+{
+  "reply_to": "3EB0PARENT",
+  "quoted": {
+    "message_id": "3EB0PARENT",
+    "participant": "6289876543210@s.whatsapp.net",
+    "phone": "6289876543210",
+    "from_me": false,
+    "type": "text",
+    "preview": "The original message"
+  }
+}
+```
+
+Inbound, both fields are populated for any reply. Outbound, supply `reply_to`
+to send a quoted reply; `quoted.participant` is optional but strongly
+recommended for group replies, since the gateway otherwise cannot identify the
+original sender. See `RENR_PLUGIN_IMPLEMENTATION.md` for the full field table.
+
+> **Compatibility note:** `reply_to` was previously always `null`. It is now
+> populated whenever a message is a reply, and the new `quoted` key appears
+> alongside it. Consumers that reject unknown JSON properties must be updated
+> before deploying.
+
 ## Usage
 
 ### Start the Application

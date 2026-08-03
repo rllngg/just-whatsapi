@@ -215,6 +215,27 @@ type PollVoteContent struct {
 	SelectedOptions []string `json:"selected_options"`
 }
 
+// QuotedMessage describes the message that a reply is quoting. It is populated
+// from waProto.ContextInfo on any message variant that can carry one.
+type QuotedMessage struct {
+	// MessageID is the WhatsApp stanza ID of the quoted message
+	MessageID string `json:"message_id"`
+	// Participant is the JID of the quoted message's sender. Required to render
+	// group replies, and required to build a valid outbound quote.
+	Participant string `json:"participant,omitempty"`
+	// ChatID is ContextInfo.RemoteJID, set only for cross-chat quotes such as
+	// status replies
+	ChatID string `json:"chat_id,omitempty"`
+	// FromMe indicates the quoted message was sent by this device
+	FromMe bool `json:"from_me"`
+	// Type is the quoted message's type, using the same vocabulary as
+	// MessagePayload.Type
+	Type string `json:"type,omitempty"`
+	// Preview is a short text or caption excerpt so consumers can render a
+	// quote bubble without a database lookup
+	Preview string `json:"preview,omitempty"`
+}
+
 // MessagePayload represents the message content structure
 type MessagePayload struct {
 	MessageID  string           `json:"message_id"`
@@ -241,6 +262,10 @@ type MessagePayload struct {
 	Poll       *PollContent     `json:"poll,omitempty"`
 	PollVote   *PollVoteContent `json:"poll_vote,omitempty"`
 	HasMedia   bool             `json:"has_media,omitempty"`
+	// Quoted is set when this message is a reply to another message
+	Quoted *QuotedMessage `json:"quoted,omitempty"`
+	// IsForwarded reports ContextInfo.IsForwarded
+	IsForwarded bool `json:"is_forwarded,omitempty"`
 }
 
 // MessageReceivedEvent is published when a message is received from WhatsApp

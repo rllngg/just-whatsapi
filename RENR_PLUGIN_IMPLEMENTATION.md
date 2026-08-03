@@ -326,6 +326,82 @@ PLUGINS_WEBHOOK_S3_ENDPOINT=https://minio.example.com  # Optional for MinIO
 }
 ```
 
+### Example Reply (Quoted) Message
+
+When a message is a reply, `reply_to` carries the quoted message ID and `quoted`
+carries the full context needed to render a quote bubble without a lookup. Both
+fields are omitted entirely for non-replies.
+
+```json
+{
+  "channel_id": 123,
+  "message_id": "3EB0XXXXX",
+  "ref": "123",
+  "to": {...},
+  "from": {...},
+  "reply_to": "3EB0PARENT",
+  "quoted": {
+    "message_id": "3EB0PARENT",
+    "participant": "6289876543210@s.whatsapp.net",
+    "phone": "6289876543210",
+    "from_me": false,
+    "type": "text",
+    "preview": "The original message being replied to"
+  },
+  "body": {
+    "type": "text",
+    "content": "Yes, I agree!",
+    "files": null,
+    "filesURL": null
+  },
+  "timestamp": 1699999999
+}
+```
+
+#### Quoted fields
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `message_id` | string | WhatsApp stanza ID of the quoted message |
+| `participant` | string | JID of the quoted message's sender. Required to render group replies correctly |
+| `phone` | string | Phone/LID user extracted from `participant` |
+| `chat_id` | string | Only set for cross-chat quotes such as status replies |
+| `from_me` | bool | True when the quoted message was sent by this device |
+| `type` | string | Quoted message type, same vocabulary as `body.type` |
+| `preview` | string | Short text/caption excerpt, truncated to 512 runes |
+
+`quoted.preview` is derived from the copy of the original message embedded by
+WhatsApp. It is never a media download, so media quotes carry their caption (or
+filename for documents) rather than the file itself.
+
+### Sending a Reply
+
+To send a reply, include `reply_to` (and ideally `quoted.participant`) on the
+outbound payload. The plugin maps these to `reply_message_id` and
+`reply_participant` on the send request.
+
+```json
+{
+  "channel_id": 123,
+  "to": {"id": "6281234567890@s.whatsapp.net"},
+  "reply_to": "3EB0PARENT",
+  "quoted": {
+    "message_id": "3EB0PARENT",
+    "participant": "6289876543210@s.whatsapp.net"
+  },
+  "body": {"type": "text", "content": "Replying to your message"}
+}
+```
+
+`quoted.participant` is optional. When it is absent the gateway resolves the
+sender from its in-memory message cache, and failing that infers it from the
+chat: for a direct message the other party, for a group the group JID with a
+warning logged. Supplying it is strongly recommended for group replies, where
+the fallback cannot identify the original sender.
+
+Replies are supported for `text`, `image`, `document`, `video`, `audio` and
+`file`. Reactions carry their own target and ignore these fields.
+
 ## Benefits Achieved
 
 ✅ **Clean Manager** - No queue dependencies, only WhatsApp logic

@@ -28,6 +28,34 @@ func getStringValue(s *string) string {
 	return *s
 }
 
+// quotedMessageID returns the ID of the message being replied to. Producers may
+// supply it either as the flat reply_to field or inside the quoted object.
+func quotedMessageID(msg QueueChatMessage) string {
+	if id := getStringValue(msg.ReplyTo); id != "" {
+		return id
+	}
+	if msg.Quoted != nil {
+		return msg.Quoted.MessageID
+	}
+	return ""
+}
+
+// quotedParticipant returns the sender JID of the quoted message when the
+// producer supplied a structured quote. An empty result is fine: the manager
+// falls back to its message cache, then to chat-shape heuristics.
+func quotedParticipant(msg QueueChatMessage) string {
+	if msg.Quoted == nil {
+		return ""
+	}
+	if msg.Quoted.Participant != "" {
+		return msg.Quoted.Participant
+	}
+	if msg.Quoted.Phone != "" {
+		return formatPhoneToJID(msg.Quoted.Phone)
+	}
+	return ""
+}
+
 // extractPhoneFromJID extracts phone number from WhatsApp JID
 // Handles multiple formats:
 // - Individual: "6281234567890@s.whatsapp.net"

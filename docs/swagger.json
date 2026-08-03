@@ -391,6 +391,9 @@
                 },
                 "reply_message_id": {
                     "type": "string"
+                },
+                "reply_participant": {
+                    "type": "string"
                 }
             }
         },
@@ -416,6 +419,9 @@
                     "type": "boolean"
                 },
                 "reply_message_id": {
+                    "type": "string"
+                },
+                "reply_participant": {
                     "type": "string"
                 },
                 "view_once": {
@@ -476,6 +482,9 @@
                     "type": "string"
                 },
                 "reply_message_id": {
+                    "type": "string"
+                },
+                "reply_participant": {
                     "type": "string"
                 }
             }

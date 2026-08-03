@@ -45,6 +45,8 @@ definitions:
         type: boolean
       reply_message_id:
         type: string
+      reply_participant:
+        type: string
     type: object
   whatsapp.SendImageMessageRequest:
     properties:
@@ -61,6 +63,8 @@ definitions:
       is_forwarded:
         type: boolean
       reply_message_id:
+        type: string
+      reply_participant:
         type: string
       view_once:
         type: boolean
@@ -100,6 +104,8 @@ definitions:
       message:
         type: string
       reply_message_id:
+        type: string
+      reply_participant:
         type: string
     type: object
 host: localhost:8080

@@ -206,6 +206,30 @@ All webhooks follow this base structure:
 - `type` (string): Message type - "text"
 - `text.content` (string): The actual text content
 - `source` (string): Always "whatsapp" for received messages
+- `quoted` (object, optional): Present only when the message is a reply
+- `is_forwarded` (boolean, optional): Present only when the message was forwarded
+
+**Reply / Quoted Fields:**
+
+Any received message type may include a `quoted` object when it is a reply.
+The key is omitted entirely for non-replies, so existing consumers are unaffected.
+
+```json
+"quoted": {
+  "message_id": "3EB0PARENT",
+  "participant": "6289876543210@s.whatsapp.net",
+  "from_me": false,
+  "type": "text",
+  "preview": "The original message being replied to"
+}
+```
+
+- `quoted.message_id` (string): WhatsApp ID of the quoted message
+- `quoted.participant` (string): JID of the quoted message's sender, needed to render group replies
+- `quoted.chat_id` (string): Only set for cross-chat quotes such as status replies
+- `quoted.from_me` (boolean): Whether this device sent the quoted message
+- `quoted.type` (string): Quoted message type, same vocabulary as `type`
+- `quoted.preview` (string): Short text/caption excerpt, truncated to 512 runes
 
 ---
 

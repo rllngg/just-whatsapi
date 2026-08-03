@@ -381,6 +381,9 @@ const docTemplate = `{
                 },
                 "reply_message_id": {
                     "type": "string"
+                },
+                "reply_participant": {
+                    "type": "string"
                 }
             }
         },
@@ -406,6 +409,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "reply_message_id": {
+                    "type": "string"
+                },
+                "reply_participant": {
                     "type": "string"
                 },
                 "view_once": {
@@ -466,6 +472,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "reply_message_id": {
+                    "type": "string"
+                },
+                "reply_participant": {
                     "type": "string"
                 }
             }
