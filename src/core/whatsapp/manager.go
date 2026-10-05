@@ -176,7 +176,7 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 	//   - PollCreationMessageV4 / PollCreationOptionImageMessage: poll v4 wrappers
 	//   - QuestionMessage / QuestionReplyMessage: Q&A feature
 	//   - BotInvokeMessage / BotTaskMessage / BotForwardedMessage / LottieStickerMessage: bot/animated content
-	//   - NewsletterAdminProfileMessage / V2: newsletter profile updates
+	//   - NewsletterAdminProfileMessage: newsletter profile updates
 	// Cap loop at 8 to bound combined nesting (e.g. DeviceSent -> Ephemeral -> ViewOnce -> Document).
 	for i := 0; i < 8 && msg != nil; i++ {
 		switch {
@@ -230,8 +230,6 @@ func (m *Manager) extractMessagePayload(deviceID string, v *events.Message, clie
 			msg = msg.GetLottieStickerMessage().GetMessage()
 		case msg.GetNewsletterAdminProfileMessage() != nil && msg.GetNewsletterAdminProfileMessage().GetMessage() != nil:
 			msg = msg.GetNewsletterAdminProfileMessage().GetMessage()
-		case msg.GetNewsletterAdminProfileMessageV2() != nil && msg.GetNewsletterAdminProfileMessageV2().GetMessage() != nil:
-			msg = msg.GetNewsletterAdminProfileMessageV2().GetMessage()
 		default:
 			goto classify
 		}

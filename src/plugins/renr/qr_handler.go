@@ -121,7 +121,7 @@ func (p *Plugin) sendChannelUpdate(channelID int64, name string, status, referen
 		return
 	}
 
-	p.logger.Infof("Channel update sent: channel_id=%d, status=%s, id=%s", channelID, status, res.ID)
+	p.logger.Infof("Channel update sent: channel_id=%d, status=%s, id=%d", channelID, status, res.ID)
 }
 
 // handleDeviceConnectedForQR sends CONNECTED status to queue

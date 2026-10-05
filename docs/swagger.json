@@ -40,7 +40,8 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/whatsapp.DeviceInfo"
+                                "type": "object",
+                                "additionalProperties": true
                             }
                         }
                     }
@@ -66,7 +67,7 @@
                         "name": "request",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/whatsapp.CreateDeviceRequest"
+                            "$ref": "#/definitions/http.CreateDeviceRequest"
                         }
                     }
                 ],
@@ -74,7 +75,10 @@
                     "200": {
                         "description": "Returns device_id and base64 encoded QR code",
                         "schema": {
-                            "$ref": "#/definitions/whatsapp.DeviceCreateResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "400": {
@@ -202,6 +206,58 @@
                 }
             }
         },
+        "/message/history": {
+            "post": {
+                "description": "Requests message history from the user's primary WhatsApp device. The response indicates the request was sent. Actual messages will arrive via events.HistorySync events and webhooks. Supports pagination using before_message_id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Message"
+                ],
+                "summary": "Fetch message history",
+                "parameters": [
+                    {
+                        "description": "Message history request with device_id, chat_id, optional before_message_id for pagination, and count (default: 50, max: 100)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/whatsapp.FetchMessageHistoryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "History sync request sent successfully. Contains request_id for tracking.",
+                        "schema": {
+                            "$ref": "#/definitions/whatsapp.MessageHistoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or parameters",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error or device not connected",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/message/image": {
             "post": {
                 "description": "Sends an image message to a WhatsApp chat",
@@ -282,7 +338,10 @@
                     "200": {
                         "description": "Presence sent successfully",
                         "schema": {
-                            "$ref": "#/definitions/whatsapp.PresenceResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "400": {
@@ -357,13 +416,473 @@
                     }
                 }
             }
+        },
+        "/message/video": {
+            "post": {
+                "description": "Sends a video message to a WhatsApp chat",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Message"
+                ],
+                "summary": "Send video message",
+                "parameters": [
+                    {
+                        "description": "Video message request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/whatsapp.SendVideoMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Video sent successfully",
+                        "schema": {
+                            "$ref": "#/definitions/whatsapp.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "http.CreateDeviceRequest": {
+            "type": "object",
+            "properties": {
+                "device_id": {
+                    "description": "Optional device ID",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.AudioContent": {
+            "type": "object",
+            "properties": {
+                "media": {
+                    "description": "Media contains the downloaded audio data and metadata (preferred)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/whatsapp.MediaData"
+                        }
+                    ]
+                },
+                "mimetype": {
+                    "description": "Mimetype is the audio MIME type (e.g., \"audio/ogg\")",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the WhatsApp media URL for the audio (DEPRECATED - use Media field instead)",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.ContactContent": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "description": "DisplayName is the contact's display name",
+                    "type": "string"
+                },
+                "vcard": {
+                    "description": "VCard is the full vCard data",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.ContactsContent": {
+            "type": "object",
+            "properties": {
+                "contacts": {
+                    "description": "Contacts is an array of vCard strings",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "display_name": {
+                    "description": "DisplayName is the name shown for the contacts array",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.DocumentContent": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "description": "Caption is the optional document caption",
+                    "type": "string"
+                },
+                "filename": {
+                    "description": "Filename is the original filename of the document",
+                    "type": "string"
+                },
+                "media": {
+                    "description": "Media contains the downloaded document data and metadata (preferred)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/whatsapp.MediaData"
+                        }
+                    ]
+                },
+                "mimetype": {
+                    "description": "Mimetype is the document MIME type (e.g., \"application/pdf\")",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the WhatsApp media URL for the document (DEPRECATED - use Media field instead)",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.FetchMessageHistoryRequest": {
+            "type": "object",
+            "properties": {
+                "before_message_id": {
+                    "description": "Message ID to fetch before (for pagination)",
+                    "type": "string"
+                },
+                "chat_id": {
+                    "type": "string"
+                },
+                "count": {
+                    "description": "Number of messages to fetch (recommended: 50)",
+                    "type": "integer"
+                },
+                "device_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.ImageContent": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "description": "Caption is the optional image caption",
+                    "type": "string"
+                },
+                "media": {
+                    "description": "Media contains the downloaded image data and metadata (preferred)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/whatsapp.MediaData"
+                        }
+                    ]
+                },
+                "mimetype": {
+                    "description": "Mimetype is the image MIME type (e.g., \"image/jpeg\")",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the WhatsApp media URL for the image (DEPRECATED - use Media field instead)",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.LocationContent": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "description": "Address is the optional full address",
+                    "type": "string"
+                },
+                "is_live": {
+                    "description": "IsLive indicates if this is a live location",
+                    "type": "boolean"
+                },
+                "latitude": {
+                    "description": "Latitude is the location's latitude",
+                    "type": "number"
+                },
+                "longitude": {
+                    "description": "Longitude is the location's longitude",
+                    "type": "number"
+                },
+                "name": {
+                    "description": "Name is the optional location name",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the optional map URL",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.MediaData": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Data is the raw bytes of the media file",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "filename": {
+                    "description": "Filename is the suggested filename with extension",
+                    "type": "string"
+                },
+                "mimetype": {
+                    "description": "Mimetype is the detected MIME type (e.g., \"image/jpeg\", \"video/mp4\")",
+                    "type": "string"
+                },
+                "sha256": {
+                    "description": "SHA256 is the hex-encoded SHA256 hash of the media data",
+                    "type": "string"
+                },
+                "size": {
+                    "description": "Size is the size of the media in bytes",
+                    "type": "integer"
+                },
+                "whatsapp_url": {
+                    "description": "WhatsAppURL is the original WhatsApp media URL (DEPRECATED - use Data field instead)",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.MessageHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/whatsapp.MessagePayload"
+                    }
+                },
+                "request_id": {
+                    "description": "Unique ID to track this request",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.MessagePayload": {
+            "type": "object",
+            "properties": {
+                "audio": {
+                    "$ref": "#/definitions/whatsapp.AudioContent"
+                },
+                "chat_id": {
+                    "type": "string"
+                },
+                "chat_name": {
+                    "description": "Group name for groups, contact name for DM",
+                    "type": "string"
+                },
+                "contact": {
+                    "$ref": "#/definitions/whatsapp.ContactContent"
+                },
+                "contacts": {
+                    "$ref": "#/definitions/whatsapp.ContactsContent"
+                },
+                "document": {
+                    "$ref": "#/definitions/whatsapp.DocumentContent"
+                },
+                "from_me": {
+                    "type": "boolean"
+                },
+                "has_media": {
+                    "type": "boolean"
+                },
+                "image": {
+                    "$ref": "#/definitions/whatsapp.ImageContent"
+                },
+                "is_forwarded": {
+                    "description": "IsForwarded reports ContextInfo.IsForwarded",
+                    "type": "boolean"
+                },
+                "is_group": {
+                    "type": "boolean"
+                },
+                "location": {
+                    "$ref": "#/definitions/whatsapp.LocationContent"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "poll": {
+                    "$ref": "#/definitions/whatsapp.PollContent"
+                },
+                "poll_vote": {
+                    "$ref": "#/definitions/whatsapp.PollVoteContent"
+                },
+                "protocol": {
+                    "$ref": "#/definitions/whatsapp.ProtocolContent"
+                },
+                "push_name": {
+                    "description": "Original PushName from WhatsApp",
+                    "type": "string"
+                },
+                "quoted": {
+                    "description": "Quoted is set when this message is a reply to another message",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/whatsapp.QuotedMessage"
+                        }
+                    ]
+                },
+                "reaction": {
+                    "$ref": "#/definitions/whatsapp.ReactionContent"
+                },
+                "sender": {
+                    "type": "string"
+                },
+                "sender_name": {
+                    "description": "Full name or PushName of sender",
+                    "type": "string"
+                },
+                "sticker": {
+                    "$ref": "#/definitions/whatsapp.StickerContent"
+                },
+                "text": {
+                    "$ref": "#/definitions/whatsapp.TextContent"
+                },
+                "timestamp": {
+                    "type": "integer"
+                },
+                "type": {
+                    "description": "\"text\", \"image\", \"video\", \"audio\", \"document\", \"sticker\", \"contact\", \"contacts\", \"location\", \"live_location\", \"reaction\", \"poll\", \"poll_vote\", \"protocol\", \"unknown\"",
+                    "type": "string"
+                },
+                "video": {
+                    "$ref": "#/definitions/whatsapp.VideoContent"
+                }
+            }
+        },
         "whatsapp.MessageResponse": {
             "type": "object",
             "properties": {
                 "message_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.PollContent": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name is the poll question",
+                    "type": "string"
+                },
+                "options": {
+                    "description": "Options are the available poll options",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/whatsapp.PollOption"
+                    }
+                },
+                "selectable_count": {
+                    "description": "SelectableCount is the maximum number of options that can be selected",
+                    "type": "integer"
+                }
+            }
+        },
+        "whatsapp.PollOption": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name is the option text",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.PollVoteContent": {
+            "type": "object",
+            "properties": {
+                "poll_message_id": {
+                    "description": "PollMessageID is the ID of the original poll message",
+                    "type": "string"
+                },
+                "selected_options": {
+                    "description": "SelectedOptions are the option names that were selected",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "whatsapp.ProtocolContent": {
+            "type": "object",
+            "properties": {
+                "target_message_id": {
+                    "description": "TargetMessageID is the ID of the affected message (for revoke)",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the protocol message type (\"revoke\", \"ephemeral_setting\", etc.)",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.QuotedMessage": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "description": "ChatID is ContextInfo.RemoteJID, set only for cross-chat quotes such as\nstatus replies",
+                    "type": "string"
+                },
+                "from_me": {
+                    "description": "FromMe indicates the quoted message was sent by this device",
+                    "type": "boolean"
+                },
+                "message_id": {
+                    "description": "MessageID is the WhatsApp stanza ID of the quoted message",
+                    "type": "string"
+                },
+                "participant": {
+                    "description": "Participant is the JID of the quoted message's sender. Required to render\ngroup replies, and required to build a valid outbound quote.",
+                    "type": "string"
+                },
+                "preview": {
+                    "description": "Preview is a short text or caption excerpt so consumers can render a\nquote bubble without a database lookup",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the quoted message's type, using the same vocabulary as\nMessagePayload.Type",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.ReactionContent": {
+            "type": "object",
+            "properties": {
+                "emoji": {
+                    "description": "Emoji is the emoji used for the reaction (empty string means removed)",
+                    "type": "string"
+                },
+                "target_message_id": {
+                    "description": "TargetMessageID is the ID of the message being reacted to",
+                    "type": "string"
+                },
+                "target_sender": {
+                    "description": "TargetSender is the sender of the target message",
                     "type": "string"
                 }
             }
@@ -393,6 +912,7 @@
                     "type": "string"
                 },
                 "reply_participant": {
+                    "description": "ReplyParticipant is the JID of the quoted message's sender. Optional:\nwhen empty it is resolved from the message cache, or inferred for DMs.",
                     "type": "string"
                 }
             }
@@ -422,6 +942,7 @@
                     "type": "string"
                 },
                 "reply_participant": {
+                    "description": "ReplyParticipant is the JID of the quoted message's sender. Optional:\nwhen empty it is resolved from the message cache, or inferred for DMs.",
                     "type": "string"
                 },
                 "view_once": {
@@ -485,44 +1006,99 @@
                     "type": "string"
                 },
                 "reply_participant": {
+                    "description": "ReplyParticipant is the JID of the quoted message's sender. Optional:\nwhen empty it is resolved from the message cache, or inferred for DMs.",
                     "type": "string"
                 }
             }
         },
-        "whatsapp.CreateDeviceRequest": {
+        "whatsapp.SendVideoMessageRequest": {
             "type": "object",
             "properties": {
-                "device_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "whatsapp.DeviceInfo": {
-            "type": "object",
-            "properties": {
-                "id": {
+                "caption": {
                     "type": "string"
                 },
-                "status": {
+                "chat_id": {
                     "type": "string"
-                }
-            }
-        },
-        "whatsapp.DeviceCreateResponse": {
-            "type": "object",
-            "properties": {
+                },
                 "device_id": {
                     "type": "string"
                 },
-                "qr_code": {
+                "duration": {
+                    "type": "integer"
+                },
+                "file_url": {
+                    "type": "string"
+                },
+                "is_forwarded": {
+                    "type": "boolean"
+                },
+                "reply_message_id": {
+                    "type": "string"
+                },
+                "reply_participant": {
+                    "description": "ReplyParticipant is the JID of the quoted message's sender. Optional:\nwhen empty it is resolved from the message cache, or inferred for DMs.",
+                    "type": "string"
+                },
+                "view_once": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "whatsapp.StickerContent": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "description": "Caption is the optional sticker caption (rarely used)",
+                    "type": "string"
+                },
+                "media": {
+                    "description": "Media contains the downloaded sticker data and metadata (preferred)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/whatsapp.MediaData"
+                        }
+                    ]
+                },
+                "mimetype": {
+                    "description": "Mimetype is the sticker MIME type (e.g., \"image/webp\")",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the WhatsApp media URL for the sticker (DEPRECATED - use Media field instead)",
                     "type": "string"
                 }
             }
         },
-        "whatsapp.PresenceResponse": {
+        "whatsapp.TextContent": {
             "type": "object",
             "properties": {
-                "message_id": {
+                "content": {
+                    "description": "Content is the actual text message",
+                    "type": "string"
+                }
+            }
+        },
+        "whatsapp.VideoContent": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "description": "Caption is the optional video caption",
+                    "type": "string"
+                },
+                "media": {
+                    "description": "Media contains the downloaded video data and metadata (preferred)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/whatsapp.MediaData"
+                        }
+                    ]
+                },
+                "mimetype": {
+                    "description": "Mimetype is the video MIME type (e.g., \"video/mp4\")",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the WhatsApp media URL for the video (DEPRECATED - use Media field instead)",
                     "type": "string"
                 }
             }
